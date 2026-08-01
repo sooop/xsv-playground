@@ -1,0 +1,13 @@
+node_modules/
+dist/
+fixtures/*.csv
+fixtures/*.tsv
+fixtures/*.txt
+.DS_Store
+*.local
+
+# E2E 스크린샷
+.e2e-shots/
+.edge-tmp/
+
+*.stackdump

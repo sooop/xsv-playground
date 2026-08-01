@@ -1,0 +1,37 @@
+{
+  "name": "xsv-playground",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "단일 HTML로 동작하는 CSV/TSV 조작 도구",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "fixture": "node fixtures/gen.mjs 100000 25 > fixtures/big.csv",
+    "e2e": "node tests/e2e.mjs",
+    "e2e:shots": "node tests/e2e.mjs --shots",
+    "edge": "node tests/edge.mjs",
+    "verify": "npm run check && npm run test && npm run build && npm run e2e && npm run edge"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^6.2.1",
+    "@tsconfig/svelte": "^5.0.5",
+    "puppeteer-core": "^25.4.0",
+    "svelte": "^5.42.2",
+    "svelte-check": "^4.3.3",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.9",
+    "vite-plugin-singlefile": "^2.3.0",
+    "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true
+  }
+}
