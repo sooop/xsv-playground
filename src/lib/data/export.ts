@@ -118,7 +118,7 @@ export async function runExport(
 
   const base = fileBase(ds.fileName, opts.scope)
   if (opts.format === 'xlsx') {
-    const bytes = buildXlsx(matrix, base)
+    const bytes = await buildXlsx(matrix, base)
     download(
       new Blob([bytes as unknown as BlobPart], {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

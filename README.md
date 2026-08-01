@@ -1,13 +1,17 @@
-# xsv — 단일 HTML CSV/TSV 워크벤치
+# xsv-playground — 단일 HTML CSV/TSV 조작 도구
 
 큰 CSV/TSV를 빠르게 훑고, 찾고, 필요한 부분만 잘라내는 도구. **빌드 결과는 `dist/index.html`
-파일 하나**이고, 더블클릭해서 열면 그대로 동작한다. 런타임에 외부 네트워크 요청이 **0건**이라
-오프라인·사내 폐쇄망에 파일 하나만 전달해도 된다. 데이터는 브라우저 밖으로 나가지 않는다.
+파일 하나**이고, 더블클릭해서 열면 그대로 동작한다. 데이터는 브라우저 밖으로 나가지 않는다.
+
+CSV/TSV를 다루는 모든 기능은 외부 네트워크 요청이 **0건**이라 오프라인·사내 폐쇄망에 파일
+하나만 전달해도 된다. 유일한 예외는 **XLSX 내보내기**다 — 이 라이브러리(SheetJS, 약 1MB)를
+최종 HTML에 담는 대신, XLSX 형식을 실제로 선택한 시점에 CDN에서 받아온다. 그 덕에 XLSX를 한 번도
+안 쓰면 파일이 훨씬 가볍고, 쓰는 순간에만(그것도 세션당 최초 1회만) 인터넷 연결이 필요하다.
 
 ```
 npm install
 npm run dev            # 개발 서버
-npm run build          # → dist/index.html (약 560KB, 단일 파일)
+npm run build          # → dist/index.html (약 230KB, 단일 파일)
 ```
 
 ## 기능
@@ -83,7 +87,9 @@ P I X    열 복제 / 숨기기 / 삭제
 
 **내보내기** (Ctrl+E) · 범위 3종(전체 / 보이는 부분 / 선택 영역) × 대상 2종(파일 / 클립보드) ×
 형식 3종(CSV / TSV / XLSX) · 헤더 포함, 칼럼 순서, 인용 규칙, 개행, BOM 선택 ·
-Ctrl+C는 `text/plain`(TSV)과 `text/html`(표)을 함께 기록해 Excel·Sheets에 표 구조가 유지된다
+Ctrl+C는 `text/plain`(TSV)과 `text/html`(표)을 함께 기록해 Excel·Sheets에 표 구조가 유지된다.
+**XLSX만** 형식을 고른 시점에 SheetJS를 CDN에서 받아온다(세션당 최초 1회, 실패하면 인터넷
+연결을 확인하라는 안내와 함께 실패로 끝난다 — CSV/TSV로 대신 내보낼 수 있다)
 
 `?` 를 누르면 전체 단축키 목록이 나온다.
 
@@ -100,7 +106,7 @@ Ctrl+C는 `text/plain`(TSV)과 `text/html`(표)을 함께 기록해 Excel·Sheet
 | 스크롤 (일반 휠) | 16.7 ms/frame = 60 fps |
 | 스크롤 (극단적 플링, 매 프레임 화면 전량 교체) | 30 ms/frame |
 | DOM 노드 | 43행 × 15열 ≈ 645 셀 (논리 250만 셀) |
-| `dist/index.html` | 560 KB (gzip 179 KB) |
+| `dist/index.html` | 229 KB (gzip 71 KB) — SheetJS는 CDN 지연 로드라 포함되지 않는다 |
 
 ## 구조
 
@@ -109,7 +115,7 @@ src/lib/
   parse/    csv.ts        재개 가능한 RFC4180 파서 (청크 파싱 + 진행률)
             detect.ts     구분자·헤더·인코딩·칼럼 타입 추론
             serialize.ts  CSV/TSV/HTML 표 직렬화
-            xlsx.ts       SheetJS 래퍼 (쓰기 전용, 의존성을 이 파일에 격리)
+            xlsx.ts       SheetJS 래퍼 — CDN에서 지연 로드 (쓰기 전용, 의존성을 이 파일에 격리)
   data/     dataset.svelte.ts  원본 데이터 + 편집 연산(Op) 적용
             view.svelte.ts     필터 → 정렬 파이프라인 (인덱스 배열만 생성)
             selection.svelte.ts  다중 사각 범위 선택 모델
@@ -170,10 +176,11 @@ npm run verify     # 타입체크 + 단위 테스트 + 빌드 + E2E + 극단 입
 
 - **`npm run test`** — 278개 단위 테스트 (파서, 쿼리 문법, 정렬 비교자, Op 역연산 라운드트립,
   직렬화 라운드트립, 숨기기 인덱스 매핑, 찾기·바꾸기 스캔/계획, 나누기·결합 계획, 스토어 통합)
-- **`npm run e2e`** — 263개 검사. 실제 Chrome에서 `dist/index.html`을 `file://`로 열어
+- **`npm run e2e`** — 269개 검사. 실제 Chrome에서 `dist/index.html`을 `file://`로 열어
   전 기능을 조작한다. 열 관리 패널, 우클릭 메뉴 키보드 조작, 거터·헤더 휠 스크롤, 공통
-  다이얼로그의 확인/취소/Escape까지 포함한다. 외부 요청·콘솔 에러가 하나라도 있으면 실패한다.
-  `npm run e2e:shots`로 각 단계 스크린샷을 `.e2e-shots/`에 남긴다.
+  다이얼로그의 확인/취소/Escape까지 포함한다. **네트워크 요청은 XLSX 내보내기 시의 SheetJS CDN
+  요청 정확히 1건만 허용**하고, 그 외 외부 요청·콘솔 에러가 하나라도 있으면 실패한다(이 검사는
+  실제 인터넷 연결이 필요하다). `npm run e2e:shots`로 각 단계 스크린샷을 `.e2e-shots/`에 남긴다.
 - **`npm run edge`** — 24개 검사. cp949 인코딩, 500칼럼, 4000자 셀, CRLF, 인용 안 개행,
   헤더 없는 파일, 세미콜론 구분자, 내보내기 라운드트립.
 
@@ -193,10 +200,17 @@ xlsx **읽기**(입력은 csv/tsv 텍스트만, xlsx는 내보내기 전용) · 
 
 ## 의존성
 
-Svelte 5 + TypeScript + Vite, `vite-plugin-singlefile`로 단일 파일 번들.
-런타임 의존성은 SheetJS(`xlsx`, 내보내기 전용) 하나뿐이다. npm의 `xlsx@0.18.5`에는 수정되지
-않은 취약점 2건(파싱 경로)이 있어 **SheetJS 공식 배포처의 0.20.3**을 쓴다 —
-`package.json`의 의존성이 `https://cdn.sheetjs.com/...` URL인 이유다.
+Svelte 5 + TypeScript + Vite, `vite-plugin-singlefile`로 단일 파일 번들. **런타임 의존성은
+0개다** — SheetJS(`xlsx`)는 `import type`으로만 참조해 타입 체크에만 쓰고, 빌드 산출물에는
+실행 코드가 전혀 들어가지 않는다(`package.json`의 devDependencies에 있는 이유). 실제 라이브러리는
+`src/lib/parse/xlsx.ts`가 XLSX 내보내기 시점에 `<script>` 태그를 주입해 SheetJS 공식 CDN
+(`cdn.sheetjs.com`)에서 UMD 빌드를 받아오고, 세션 안에서는 한 번만 받는다.
 
-폰트는 로컬 모노스페이스 스택만 사용하고 아이콘은 인라인 SVG다. 외부 리소스를 참조하는 순간
-"파일 하나로 동작한다"는 전제가 깨지므로 E2E가 이를 감시한다.
+이건 명시적인 트레이드오프다: XLSX 내보내기는 그 순간의 CDN이 서빙하는 코드를 그대로 실행하므로
+빌드 시점에 고정해 검증한 코드보다 신뢰 경계가 넓다. 인터넷이 없으면(사내 폐쇄망 등) 그 기능만
+실패하고 안내 토스트가 뜬다 — CSV/TSV 내보내기와 그 외 모든 기능은 이 트레이드오프와 무관하게
+완전히 오프라인으로 동작한다. `tests/e2e.mjs`는 전체 실행 동안 SheetJS CDN 요청이 **XLSX
+내보내기 그 한 번, 정확히 그 주소로만** 일어나는지 감시한다.
+
+폰트는 로컬 모노스페이스 스택만 사용하고 아이콘은 인라인 SVG다. XLSX를 제외한 외부 리소스를
+참조하는 순간 "파일 하나로 동작한다"는 전제가 깨지므로 E2E가 이를 감시한다.

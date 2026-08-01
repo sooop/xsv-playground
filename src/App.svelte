@@ -12,6 +12,7 @@
   import { View } from './lib/data/view.svelte'
   import { parseChunked } from './lib/parse/csv'
   import { decodeAs, decodeBytes, detectDelimiter, finalize } from './lib/parse/detect'
+  import { isSheetJSLoaded } from './lib/parse/xlsx'
   import ColumnFilterMenu from './lib/ui/ColumnFilterMenu.svelte'
   import ColumnManager from './lib/ui/ColumnManager.svelte'
   import ContextMenu, { type MenuItem } from './lib/ui/ContextMenu.svelte'
@@ -968,6 +969,9 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
 
   async function doExport(opts: ExportOptions): Promise<void> {
     showExport = false
+    // xlsx는 SheetJS를 CDN에서 처음 받아오는 동안 다른 형식보다 오래 걸릴 수 있어 미리 안내한다
+    // (이미 받아와 있으면 매번 뜨는 게 소음이라 최초 1회만 보여준다)
+    if (opts.format === 'xlsx' && !isSheetJSLoaded()) toast('xlsx 준비 중 (SheetJS를 CDN에서 받는 중)…')
     try {
       const msg = await runExport(ds, view, sel, opts)
       toast(msg, 'ok')

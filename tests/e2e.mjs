@@ -46,12 +46,19 @@ const browser = await puppeteer.launch({
 const page = await browser.newPage()
 
 // --- 외부 요청 및 에러 감시 ---
+// SheetJS는 XLSX 내보내기를 실제로 쓸 때만 CDN에서 받아온다 — "예상된 유일한 예외"라
+// 그 외 모든 외부 요청과 분리해서 센다. 전자가 1건도 아니거나(0건, 또는 xlsx 없이 발생),
+// 후자가 1건이라도 있으면 "완전히 오프라인" 약속이 깨진 것이다.
+const SHEETJS_CDN = 'https://cdn.sheetjs.com/'
 const external = []
+const sheetjsRequests = []
 const consoleErrors = []
 const pageErrors = []
 page.on('request', (r) => {
   const u = r.url()
-  if (!u.startsWith('file://') && !u.startsWith('data:') && !u.startsWith('blob:')) external.push(u)
+  if (u.startsWith('file://') || u.startsWith('data:') || u.startsWith('blob:')) return
+  if (u.startsWith(SHEETJS_CDN)) sheetjsRequests.push(u)
+  else external.push(u)
 })
 page.on('console', (m) => {
   if (m.type() === 'error') consoleErrors.push(m.text())
@@ -209,6 +216,7 @@ await page.waitForSelector('#app *', { timeout: 10000 })
 group('부팅 (file://)')
 check('앱 마운트', (await page.$$('#app *')).length > 0)
 check('외부 네트워크 요청 0건', external.length === 0, external.slice(0, 3).join(', '))
+check('부팅만으로는 SheetJS도 받지 않는다', sheetjsRequests.length === 0, sheetjsRequests.join(', '))
 check('페이지 에러 없음', pageErrors.length === 0, pageErrors.slice(0, 2).join(' | '))
 check('콘솔 에러 없음', consoleErrors.length === 0, consoleErrors.slice(0, 2).join(' | '))
 const bootText = await page.evaluate(() => document.body.innerText)
@@ -842,6 +850,11 @@ check('CSV에 BOM 포함', csvHead?.charCodeAt(0) === 0xfeff, 'U+' + csvHead?.ch
 check('CSV 헤더 행 포함', !!csvHead?.includes('주문번호'), String(csvHead).slice(1, 36))
 check('CSV 인용 규칙 적용', !!csvHead?.includes('"모니터 27') || !!csvHead?.includes('"케이블, 1.5m"'), 'ok')
 
+check(
+  'XLSX 선택 전에는 SheetJS를 받지 않는다',
+  sheetjsRequests.length === 0,
+  sheetjsRequests.join(', '),
+)
 await press('Control+KeyE')
 await page.waitForSelector('[aria-label=내보내기]')
 await page.evaluate(() => {
@@ -850,11 +863,28 @@ await page.evaluate(() => {
 })
 await sleep(250)
 await clickSave('저장')
-await sleep(2000)
+// SheetJS를 CDN에서 처음 받아오는 실제 네트워크 왕복이 걸리므로 고정 sleep 대신 완료를 기다린다
+await page.waitForFunction(() => window.__blobs && window.__blobs.length > 0, { timeout: 15000 })
+await sleep(300) // arrayBuffer() 콜백이 매직바이트를 채울 시간
 blobs = await page.evaluate(() => window.__blobs)
 const magic = await page.evaluate(() => window.__lastMagic)
 check('XLSX 파일 생성', blobs.length === 1 && blobs[0].size > 1000, JSON.stringify(blobs[0]))
 check('XLSX ZIP 매직바이트', magic === '504b0304', String(magic))
+check(
+  'XLSX 내보내기가 SheetJS를 CDN에서 정확히 1건 가져온다',
+  sheetjsRequests.length === 1,
+  sheetjsRequests.join(', '),
+)
+check(
+  '가져온 주소가 공식 SheetJS CDN',
+  sheetjsRequests[0]?.startsWith(SHEETJS_CDN) ?? false,
+  sheetjsRequests[0],
+)
+check(
+  'SheetJS 외에 다른 외부 요청은 없다',
+  external.length === 0,
+  external.slice(0, 3).join(', '),
+)
 
 await press('Control+KeyE')
 await page.waitForSelector('[aria-label=내보내기]')
@@ -1697,7 +1727,12 @@ check('본문 휠은 그대로 동작', (await scrollState()).top > beforeBody, 
 
 // ===================================================================
 group('최종')
-check('전 과정 외부 요청 0건', external.length === 0, external.slice(0, 3).join(', '))
+check('전 과정 예상 밖 외부 요청 0건', external.length === 0, external.slice(0, 3).join(', '))
+check(
+  '전 과정 통틀어 SheetJS는 XLSX 내보내기 그 한 번만 받아온다',
+  sheetjsRequests.length === 1,
+  sheetjsRequests.length + '건: ' + sheetjsRequests.join(', '),
+)
 check('전 과정 페이지 에러 없음', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '))
 check('전 과정 콘솔 에러 없음', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '))
 
