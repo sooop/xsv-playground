@@ -1,6 +1,25 @@
 <script lang="ts">
   import { parseClipboardTable, writeTable } from './lib/data/clipboard'
   import { Dataset } from './lib/data/dataset.svelte'
+  import {
+    DOC_SCHEMA_V,
+    defaultDocName,
+    migrateBody,
+    packDoc,
+    unpackDoc,
+    type DocMeta,
+  } from './lib/data/docSnapshot'
+  import {
+    DocStoreError,
+    deleteDoc,
+    getDocBody,
+    getDocMeta,
+    idbUsable,
+    listDocs,
+    newDocId,
+    putDoc,
+    storageInfo,
+  } from './lib/data/docStore'
   import { buildMatrix, runExport } from './lib/data/export'
   import type { ReplacePlan } from './lib/data/find'
   import { FindStore } from './lib/data/findState.svelte'
@@ -16,9 +35,10 @@
   import ColumnFilterMenu from './lib/ui/ColumnFilterMenu.svelte'
   import ColumnManager from './lib/ui/ColumnManager.svelte'
   import ContextMenu, { type MenuItem } from './lib/ui/ContextMenu.svelte'
-  import DropZone from './lib/ui/DropZone.svelte'
   import { dialogs } from './lib/ui/dialog/dialog.svelte'
   import DialogHost from './lib/ui/dialog/DialogHost.svelte'
+  import DocPicker from './lib/ui/DocPicker.svelte'
+  import DropZone from './lib/ui/DropZone.svelte'
   import ExportDialog from './lib/ui/ExportDialog.svelte'
   import FindPanel from './lib/ui/FindPanel.svelte'
   import Grid from './lib/ui/Grid.svelte'
@@ -29,7 +49,7 @@
   import SplitDialog, { type SplitResult } from './lib/ui/SplitDialog.svelte'
   import StatusBar from './lib/ui/StatusBar.svelte'
   import Toast, { type ToastItem } from './lib/ui/Toast.svelte'
-  import { num } from './lib/util/format'
+  import { bytes, num } from './lib/util/format'
   import { load, save } from './lib/util/storage'
 
   const ds = new Dataset()
@@ -159,6 +179,7 @@
     view.clearAll()
     sel.clear()
     history.clear()
+    currentDoc = null // 파일을 열면(붙여넣기·샘플 포함) 저장된 문서와의 연결이 끊긴다
     progress = null
 
     if (result.rows.length === 0) {
@@ -787,6 +808,236 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
   // --- 칼럼 필터 드롭다운 ---
   let colMenu = $state<{ col: number; anchor: HTMLElement } | null>(null)
 
+  // --- 문서 저장 (IndexedDB) ---
+  //
+  // `currentDoc`이 "지금 이 데이터가 어떤 저장된 문서에 대응하는지"의 유일한 소유자다.
+  // `loadText()`가 끝에서 항상 `currentDoc = null`을 하므로, 파일 열기·붙여넣기·샘플·인코딩
+  // 재읽기가 전부 자동으로 정체성을 잃는다 — 전부 그 함수를 지나기 때문이다. IndexedDB에서
+  // 열 때(`openDocById`)만 `loadText`를 타지 않으므로 별도로 정체성을 부여한다.
+  let currentDoc = $state<{ id: string; name: string; savedVersion: number } | null>(null)
+  /**
+   * dirty 표시는 `ds.version` 비교 하나로 끝낸다 — 알려진 공백이 있다: `setColWidth`/`autoWidth`/
+   * 열 순서 변경은 `bump()`를 하지 않으므로 폭·순서만 바꾼 변경은 감지되지 않는다. 잡으려면
+   * 그 경로들에도 `bump()`가 필요한데, 그러면 폭 드래그 한 번마다 250만 셀 파생이 재계산된다 —
+   * 이 표시는 "저장 이후 편집이 있었는가"를 대략 알려주는 용도로 충분해 포기한다.
+   */
+  const docDirty = $derived(currentDoc !== null && ds.version !== currentDoc.savedVersion)
+  let docsAvailable = $state(false)
+  let savedDocs = $state<DocMeta[]>([])
+  let showDocPicker = $state(false)
+  let docMenu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null)
+
+  $effect(() => {
+    void idbUsable().then((ok) => {
+      docsAvailable = ok
+      if (ok) void refreshDocs()
+    })
+  })
+
+  async function refreshDocs(): Promise<void> {
+    savedDocs = await listDocs()
+  }
+
+  /** 큰 문서를 저장하기 전 남은 용량을 대략 확인한다. estimate를 지원 안 하면 그냥 통과시킨다. */
+  async function guardQuota(byteLen: number): Promise<boolean> {
+    const SAFE = 32 * 1024 * 1024
+    if (byteLen < SAFE) return true
+    const info = await storageInfo()
+    if (!info) return true
+    if (info.quota - info.usage < byteLen * 1.5) {
+      return dialogs.confirm({
+        title: '저장 공간이 빠듯합니다',
+        message: `이 문서는 ${bytes(byteLen)}입니다 — 남은 공간 ${bytes(info.quota - info.usage)}`,
+        detail: '계속 저장할까요?',
+        okLabel: '계속',
+        tone: 'warn',
+      })
+    }
+    return true
+  }
+
+  /**
+   * 문서를 저장한다. `rename`이 false고 이미 알려진 문서면 조용히 덮어쓰고(Ctrl+S의 관례),
+   * 그 외에는 이름 프롬프트를 띄운다(첫 저장이거나 Ctrl+Shift+S).
+   */
+  async function saveDoc(opts: { rename: boolean }): Promise<void> {
+    if (!hasData) {
+      toast('저장할 데이터가 없습니다', 'warn')
+      return
+    }
+    if (!docsAvailable) {
+      toast('이 브라우저에서는 문서를 저장할 수 없습니다 (IndexedDB 사용 불가)', 'warn')
+      return
+    }
+
+    let id = opts.rename ? null : (currentDoc?.id ?? null)
+    let createdAt = Date.now()
+    let name = currentDoc?.name ?? ''
+
+    if (id === null) {
+      const metas = await listDocs()
+      name = defaultDocName(ds.fileName, Date.now())
+      for (;;) {
+        const input = await dialogs.prompt({
+          title: '문서 저장',
+          message: '문서 이름',
+          value: name,
+          placeholder: '예: 2026-01 주문내역',
+          validate: (v) =>
+            v.trim() === '' ? '이름을 입력하세요' : v.trim().length > 120 ? '120자 이내로' : null,
+        })
+        if (input === null) return
+        name = input.trim()
+        const dup = metas.find((m) => m.name === name)
+        if (!dup) break
+        const ok = await dialogs.confirm({
+          title: '같은 이름의 문서가 있습니다',
+          message: `"${name}"을(를) 덮어쓸까요?`,
+          okLabel: '덮어쓰기',
+          tone: 'warn',
+        })
+        if (ok) {
+          id = dup.id
+          createdAt = dup.createdAt
+          break
+        }
+        // 취소면 루프가 다시 이름 프롬프트를 띄운다
+      }
+    } else {
+      const existing = await getDocMeta(id)
+      if (existing) createdAt = existing.createdAt
+    }
+
+    // 작은 문서에서 진행률 바가 한 프레임 깜빡이는 것을 막는다
+    const showBar = ds.rowCount > 20_000
+    if (showBar) {
+      progress = 0
+      progressLabel = '문서 저장 준비…'
+      await tick()
+    }
+
+    try {
+      const finalId = id ?? newDocId()
+      const { meta, body } = packDoc(ds, { id: finalId, name, createdAt, now: Date.now() })
+      if (!(await guardQuota(meta.bytes))) return
+      await putDoc(meta, body)
+      currentDoc = { id: finalId, name, savedVersion: ds.version }
+      toast(`"${name}" 저장 · ${num(meta.rowCount)}행 · ${bytes(meta.bytes)}`, 'ok')
+      void refreshDocs()
+    } catch (e) {
+      if (e instanceof DocStoreError && e.code === 'quota') {
+        const info = await storageInfo()
+        await dialogs.alert({
+          title: '저장 공간이 부족합니다',
+          message: info ? `사용 ${bytes(info.usage)} / 할당 ${bytes(info.quota)}` : '저장 공간이 가득 찼습니다',
+          detail: '오래된 문서를 지우거나 CSV로 내보내 보관하세요.',
+          tone: 'warn',
+        })
+      } else {
+        toast(`저장하지 못했습니다: ${e instanceof Error ? e.message : e}`, 'warn')
+      }
+    } finally {
+      if (showBar) progress = null
+    }
+  }
+
+  /** IndexedDB에 저장된 문서를 연다 — `loadText`와 같은 마무리 시퀀스를 따르되 재파싱하지 않는다. */
+  async function openDocById(id: string): Promise<void> {
+    showDocPicker = false
+    const body = await getDocBody(id)
+    if (!body) {
+      toast('문서를 찾을 수 없습니다 — 이미 삭제되었을 수 있습니다', 'warn')
+      void refreshDocs()
+      return
+    }
+    if (body.v > DOC_SCHEMA_V) {
+      await dialogs.alert({
+        title: '열 수 없는 문서',
+        message: '더 새 버전의 xsv에서 저장된 문서입니다.',
+      })
+      return
+    }
+
+    const meta = await getDocMeta(id)
+    const name = meta?.name ?? ''
+
+    progress = 0
+    progressLabel = '문서 여는 중…'
+    await tick()
+
+    const { snapshot, lostRows } = await unpackDoc(migrateBody(body), (ratio, rows) => {
+      progress = ratio * 0.9
+      progressLabel = `${num(rows)}행 복원…`
+    })
+
+    ds.loadSnapshot(snapshot)
+    view.clearAll()
+    sel.clear()
+    history.clear()
+    lastBuffer = null
+    encoding = 'utf-8'
+    encodingBanner = false
+    progress = null
+
+    currentDoc = { id, name, savedVersion: ds.version }
+    toast(`"${name}" · ${num(ds.rowCount)}행 × ${ds.colCount}열`, 'ok')
+    if (lostRows > 0) toast(`${num(lostRows)}행을 복원하지 못했습니다`, 'warn')
+
+    await tick()
+    grid?.focusGrid()
+  }
+
+  async function deleteDocById(id: string, name: string): Promise<void> {
+    const ok = await dialogs.confirm({
+      title: '문서 삭제',
+      message: `"${name}"을(를) 삭제할까요?`,
+      detail: '되돌릴 수 없습니다.',
+      okLabel: '삭제',
+      danger: true,
+    })
+    if (!ok) return
+    await deleteDoc(id)
+    if (currentDoc?.id === id) currentDoc = null
+    await refreshDocs()
+    toast(`"${name}" 삭제됨`, 'ok')
+  }
+
+  function openDocMenu(e: MouseEvent): void {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    docMenu = {
+      x: r.left,
+      y: r.bottom + 4,
+      items: [
+        {
+          label: '저장',
+          accel: 's',
+          hint: 'Ctrl S',
+          disabled: !hasData || !docsAvailable,
+          run: () => void saveDoc({ rename: false }),
+        },
+        {
+          label: '다른 이름으로 저장…',
+          accel: 'a',
+          hint: 'Ctrl Shift S',
+          disabled: !hasData || !docsAvailable,
+          run: () => void saveDoc({ rename: true }),
+        },
+        { label: '', sep: true },
+        {
+          label: `문서 열기…${savedDocs.length ? ` (${savedDocs.length})` : ''}`,
+          accel: 'o',
+          disabled: !docsAvailable || savedDocs.length === 0,
+          hint: !docsAvailable
+            ? 'IndexedDB 불가'
+            : savedDocs.length === 0
+              ? '저장된 문서 없음'
+              : '',
+          run: () => (showDocPicker = true),
+        },
+      ],
+    }
+  }
+
   // --- 다이얼로그 ---
   let showExport = $state(false)
   let showHelp = $state(false)
@@ -946,6 +1197,18 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
       x: r.left,
       y: r.bottom + 4,
       items: [
+        {
+          label: '문서 저장',
+          hint: 'Ctrl S',
+          disabled: !docsAvailable,
+          run: () => void saveDoc({ rename: false }),
+        },
+        {
+          label: '문서 열기…',
+          disabled: !docsAvailable || savedDocs.length === 0,
+          run: () => (showDocPicker = true),
+        },
+        { label: '', sep: true },
         { label: '찾기…', accel: 'f', hint: 'Ctrl F', run: openFind },
         { label: '바꾸기…', accel: 'h', hint: 'Ctrl H', run: () => (showReplace = true) },
         { label: '', sep: true },
@@ -1060,17 +1323,32 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
       fileInput?.click()
       return
     }
+    if (mod && (e.key === 's' || e.key === 'S')) {
+      // Chrome의 "페이지 저장" 대화상자를 반드시 막아야 한다
+      take()
+      if (hasData) void saveDoc({ rename: e.shiftKey })
+      return
+    }
     if (e.key === 'Escape') {
       // 열려 있는 오버레이를 위에서부터 하나씩 닫는다
-      if (menu || toolsMenu) {
+      if (menu || toolsMenu || docMenu) {
         take()
         menu = null
         toolsMenu = null
-      } else if (showExport || showHelp || showReplace || splitTarget !== null || joinTargets) {
+        docMenu = null
+      } else if (
+        showExport ||
+        showHelp ||
+        showReplace ||
+        showDocPicker ||
+        splitTarget !== null ||
+        joinTargets
+      ) {
         take()
         showExport = false
         showHelp = false
         showReplace = false
+        showDocPicker = false
         splitTarget = null
         joinTargets = null
       } else if (find.open) {
@@ -1119,6 +1397,16 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
       <span class="divider"></span>
 
       <button class="btn" onclick={() => fileInput?.click()} title="파일 열기 (Ctrl+O)">열기</button>
+
+      <button
+        class="btn"
+        class:on={docDirty}
+        onclick={openDocMenu}
+        title="브라우저에 문서 저장·열기 (Ctrl+S)"
+      >
+        문서
+        <svg viewBox="0 0 8 5" width="7" height="5" aria-hidden="true"><path d="M0 0l4 4.4L8 0z" fill="currentColor" /></svg>
+      </button>
 
       <button
         class="btn"
@@ -1275,9 +1563,26 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
           onOpenReplace={() => (showReplace = true)}
         />
       {/if}
+
+      <!-- 데이터가 이미 로드된 상태에서 문서 저장/열기(그리고 파일 재읽기)의 진행률.
+           DropZone의 진행률 UI는 빈 상태 전용이라 여기 별도로 둔다. -->
+      {#if progress !== null}
+        <div class="doc-progress" role="progressbar" aria-valuenow={Math.round(progress * 100)}>
+          <div class="doc-progress-bar" style="width:{progress * 100}%"></div>
+        </div>
+        <span class="doc-progress-label">{progressLabel}</span>
+      {/if}
     </main>
 
-    <StatusBar {ds} {view} {sel} {encoding} onShowAllHidden={showAllHidden} />
+    <StatusBar
+      {ds}
+      {view}
+      {sel}
+      {encoding}
+      docName={currentDoc?.name ?? null}
+      {docDirty}
+      onShowAllHidden={showAllHidden}
+    />
   {:else}
     <DropZone
       onFiles={(f) => void loadFiles(f)}
@@ -1285,6 +1590,9 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
       onSample={loadSample}
       {progress}
       {progressLabel}
+      {savedDocs}
+      onOpenDoc={(id) => void openDocById(id)}
+      onBrowseDocs={() => (showDocPicker = true)}
     />
   {/if}
 </div>
@@ -1334,6 +1642,20 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
     y={toolsMenu.y}
     items={toolsMenu.items}
     onClose={() => (toolsMenu = null)}
+  />
+{/if}
+
+{#if docMenu}
+  <ContextMenu x={docMenu.x} y={docMenu.y} items={docMenu.items} onClose={() => (docMenu = null)} />
+{/if}
+
+{#if showDocPicker}
+  <DocPicker
+    docs={savedDocs}
+    currentId={currentDoc?.id ?? null}
+    onOpen={(id) => void openDocById(id)}
+    onDelete={(id, name) => void deleteDocById(id, name)}
+    onClose={() => (showDocPicker = false)}
   />
 {/if}
 
@@ -1462,5 +1784,37 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
     letter-spacing: 0.04em;
     pointer-events: none;
     z-index: 30;
+  }
+
+  /* 데이터가 있는 상태에서 문서 저장/열기·파일 재읽기의 진행률 — 얇은 상단 바 + 라벨 칩 */
+  .doc-progress {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 25;
+    height: 2px;
+    background: var(--border);
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .doc-progress-bar {
+    height: 100%;
+    background: var(--accent);
+    transition: width 90ms linear;
+  }
+  .doc-progress-label {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    z-index: 25;
+    padding: 4px 9px;
+    border-radius: 5px;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 10.5px;
+    box-shadow: var(--shadow-pop);
+    pointer-events: none;
   }
 </style>

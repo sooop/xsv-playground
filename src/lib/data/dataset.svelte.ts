@@ -1,4 +1,5 @@
 import { columnLabel, detectColType, normalizeHeader } from '../parse/detect'
+import type { DocSnapshot } from './docSnapshot'
 import { searchKeyFor } from './filter'
 import type { ColType, Delimiter, Op, ParseResult } from './types'
 
@@ -145,6 +146,11 @@ export class Dataset {
    */
   #firstRow: string[] | null = null
 
+  /** 원본 1행 읽기 — 문서 저장 스냅샷이 헤더 토글 왕복을 보존하기 위해 필요하다. */
+  get firstRow(): readonly string[] | null {
+    return this.#firstRow
+  }
+
   /** 파싱 결과로 데이터셋을 교체한다. */
   loadParsed(r: ParseResult, fileName = ''): void {
     this.rows = r.rows
@@ -156,6 +162,35 @@ export class Dataset {
     this.colOrder = r.header.map((_, i) => i)
     this.colTypes = r.header.map((_, i) => detectColType(r.rows, i))
     this.colWidths = estimateWidths(r.rows, r.header)
+    this.rebuildSearchIndex()
+    this.bump()
+  }
+
+  /**
+   * 저장된 문서 스냅샷으로 데이터셋을 교체한다. {@link loadParsed}의 형제이지만, 열 구조를
+   * 처음부터 다시 만들지 않고 **저장된 값을 검증 후 복원**한다 — 파일을 열 때와 달리 사용자가
+   * 맞춰둔 열 순서·폭·타입을 유지하는 것이 이 메서드의 존재 이유다.
+   *
+   * 저장 스키마가 흐트러졌거나(수동 편집 등) 열 개수가 바뀐 낡은 레코드를 열 때 그리드가
+   * 깨지지 않도록, 형태가 맞지 않는 값은 조용히 재계산으로 폴백한다.
+   */
+  loadSnapshot(s: DocSnapshot): void {
+    const width = s.header.length
+    this.rows = s.rows
+    this.header = s.header
+    this.delimiter = s.delimiter
+    this.hasHeader = s.hasHeader
+    this.fileName = s.fileName
+    this.#firstRow = s.firstRow
+
+    this.colOrder = isPermutation(s.colOrder, width) ? s.colOrder : s.header.map((_, i) => i)
+    this.colWidths =
+      s.colWidths.length === width ? s.colWidths : estimateWidths(s.rows, s.header)
+    this.colTypes =
+      s.colTypes.length === width
+        ? s.colTypes
+        : s.header.map((_, i) => detectColType(s.rows, i))
+
     this.rebuildSearchIndex()
     this.bump()
   }
@@ -473,6 +508,20 @@ function measureCol(rows: readonly string[][], headerName: string, col: number):
 /** 로드 직후 모든 칼럼의 초기 폭을 추정한다. */
 function estimateWidths(rows: readonly string[][], header: readonly string[]): number[] {
   return header.map((name, i) => measureCol(rows, name, i))
+}
+
+/**
+ * `a`가 `0..n-1`의 순열인지 검사한다. 저장된 `colOrder`를 복원하기 전 반드시 거친다 —
+ * 형태가 어긋난 값을 그대로 쓰면 {@link Dataset.srcCol}을 통해 그리드 전체가 깨진다.
+ */
+function isPermutation(a: readonly number[], n: number): boolean {
+  if (a.length !== n) return false
+  const seen = new Uint8Array(n)
+  for (const v of a) {
+    if (!Number.isInteger(v) || v < 0 || v >= n || seen[v]) return false
+    seen[v] = 1
+  }
+  return true
 }
 
 /** 헤더 없는 데이터셋용 A, B, C… 이름 생성. */

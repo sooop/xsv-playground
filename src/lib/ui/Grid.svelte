@@ -944,6 +944,7 @@
     min-height: 0;
     background: var(--bg);
     outline: none;
+    font-family: var(--font-mono);
     font-size: var(--fs-cell);
     font-variant-numeric: tabular-nums;
     /* 셀 드래그 중 텍스트 선택 방지 */

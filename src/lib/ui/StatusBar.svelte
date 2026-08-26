@@ -11,10 +11,14 @@
     sel: SelectionStore
     /** 감지된 인코딩 (표시용) */
     encoding: string
+    /** 브라우저에 저장된 문서 이름 — 저장된 적 없으면 null */
+    docName: string | null
+    /** 저장 이후 편집이 있었는지 (알려진 공백은 dataset.svelte.ts의 docDirty 주석 참고) */
+    docDirty: boolean
     /** 숨김 배지 클릭 시 전체 해제 */
     onShowAllHidden: () => void
   }
-  let { ds, view, sel, encoding, onShowAllHidden }: Props = $props()
+  let { ds, view, sel, encoding, docName, docDirty, onShowAllHidden }: Props = $props()
 
   /** 선택 영역의 숫자 통계 — 저비용 고효용. 셀이 너무 많으면 건너뛴다. */
   const MAX_STAT_CELLS = 500_000
@@ -121,6 +125,14 @@
 
   <span class="seg faint">{delimiterName(ds.delimiter)}</span>
   <span class="seg faint">{encoding}</span>
+  {#if docName}
+    <span class="divider"></span>
+    <span
+      class="seg faint file"
+      class:dirty={docDirty}
+      title="브라우저에 저장된 문서{docDirty ? ' · 저장 이후 편집됨' : ''}"
+    >{docDirty ? '● ' : ''}{docName}</span>
+  {/if}
   {#if ds.fileName}
     <span class="divider"></span>
     <span class="seg faint file" title={ds.fileName}>{ds.fileName}</span>
@@ -205,6 +217,9 @@
     max-width: 200px;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .file.dirty {
+    color: var(--accent);
   }
   .grow {
     flex: 1;

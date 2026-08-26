@@ -1,4 +1,7 @@
 <script lang="ts">
+  import type { DocMeta } from '../data/docSnapshot'
+  import { ago, num } from '../util/format'
+
   interface Props {
     onFiles: (files: FileList) => void
     onPasteText: (text: string) => void
@@ -6,8 +9,13 @@
     /** 로딩 진행률 0..1 (null이면 대기 상태) */
     progress: number | null
     progressLabel: string
+    /** 브라우저(IndexedDB)에 저장된 문서 — 최신 순. IDB 불가이거나 없으면 빈 배열 */
+    savedDocs: DocMeta[]
+    onOpenDoc: (id: string) => void
+    onBrowseDocs: () => void
   }
-  let { onFiles, onPasteText, onSample, progress, progressLabel }: Props = $props()
+  let { onFiles, onPasteText, onSample, progress, progressLabel, savedDocs, onOpenDoc, onBrowseDocs }: Props =
+    $props()
 
   let over = $state(false)
   let pasteMode = $state(false)
@@ -93,6 +101,24 @@
         <button class="btn outline" onclick={() => (pasteMode = true)}>텍스트 붙여넣기</button>
         <button class="btn" onclick={onSample}>샘플 데이터</button>
       </div>
+
+      {#if savedDocs.length > 0}
+        <div class="docs">
+          <p class="docs-title">저장된 문서</p>
+          <div class="docs-list">
+            {#each savedDocs.slice(0, 5) as d (d.id)}
+              <button class="doc-item" onclick={() => onOpenDoc(d.id)}>
+                <span class="doc-name" title={d.name}>{d.name}</span>
+                <span class="doc-meta">{num(d.rowCount)}행 · {ago(d.updatedAt)}</span>
+              </button>
+            {/each}
+          </div>
+          {#if savedDocs.length > 5}
+            <button class="docs-more" onclick={onBrowseDocs}>전체 {savedDocs.length}개 보기…</button>
+          {/if}
+        </div>
+      {/if}
+
       <p class="note">모든 처리는 이 브라우저 안에서만 일어납니다 · 서버 전송 없음</p>
     {/if}
   </div>
@@ -202,6 +228,65 @@
     color: var(--text-faint);
     font-size: 10.5px;
     letter-spacing: 0.02em;
+  }
+
+  .docs {
+    width: 100%;
+    margin-top: 22px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-soft);
+  }
+  .docs-title {
+    margin: 0 0 7px;
+    font-size: var(--fs-label);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+  .docs-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .doc-item {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 6px 9px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    text-align: left;
+    transition:
+      border-color var(--dur) var(--ease),
+      background var(--dur) var(--ease);
+  }
+  .doc-item:hover {
+    border-color: var(--border-strong);
+    background: var(--bg-hover);
+  }
+  .doc-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11.5px;
+  }
+  .doc-meta {
+    flex: none;
+    color: var(--text-faint);
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+  }
+  .docs-more {
+    margin-top: 6px;
+    color: var(--text-faint);
+    font-size: 10.5px;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .docs-more:hover {
+    color: var(--text-dim);
   }
 
   textarea {

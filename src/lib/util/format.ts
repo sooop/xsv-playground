@@ -49,3 +49,24 @@ export function baseName(fileName: string, fallback = 'export'): string {
   const base = dot > 0 ? fileName.slice(0, dot) : fileName
   return base || fallback
 }
+
+/** 상대 시각 — 문서 목록의 "3분 전" 표기. `now`는 테스트를 위한 주입 지점. */
+export function ago(ts: number, now = Date.now()): string {
+  const diffSec = Math.floor((now - ts) / 1000)
+  if (diffSec < 5) return '방금 전'
+  if (diffSec < 60) return `${diffSec}초 전`
+  const diffMin = Math.floor(diffSec / 60)
+  if (diffMin < 60) return `${diffMin}분 전`
+  const diffHour = Math.floor(diffMin / 60)
+  if (diffHour < 24) return `${diffHour}시간 전`
+
+  const d = new Date(ts)
+  const n = new Date(now)
+  const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+  const dayDiff = Math.round((startOfDay(n) - startOfDay(d)) / 86_400_000)
+  if (dayDiff === 1) return '어제'
+  if (dayDiff < 7) return `${dayDiff}일 전`
+
+  const pad = (v: number) => String(v).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}

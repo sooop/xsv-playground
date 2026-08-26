@@ -1538,6 +1538,150 @@ await sleep(420)
 check('헤더행 토글 복귀', (await headerNames())[0] === hdrBefore, (await headerNames())[0])
 
 // ===================================================================
+group('문서 저장 · 열기 (IndexedDB)')
+// puppeteer는 실행마다 새 프로필을 쓰므로 여기서부터 IndexedDB는 항상 빈 상태다.
+
+/** 툴바의 "문서" 드롭다운을 연다. 체브런 SVG가 딸려 있어 textContent가 정확히 일치하지 않는다. */
+const openDocDropdown = async () => {
+  await page.evaluate(() => {
+    ;[...document.querySelectorAll('.toolbar button')]
+      .find((b) => b.textContent.trim().startsWith('문서'))
+      .click()
+  })
+  await sleep(200)
+}
+
+/** 공통 prompt 다이얼로그 입력을 전체 선택 후 덮어쓰고 확인을 누른다. */
+const fillPrompt = async (text) => {
+  await page.waitForSelector('[role=alertdialog] input', { timeout: 3000 })
+  await sleep(150) // DialogHost의 focus+select가 requestAnimationFrame 뒤에 일어난다
+  await page.click('[role=alertdialog] input')
+  await press('Control+KeyA') // 기본값(제안된 이름)을 전부 선택 — 타이핑이 덮어쓰게 한다
+  if (text) await page.keyboard.type(text)
+  else await page.keyboard.press('Backspace')
+  await page.evaluate(() => document.querySelector('[role=alertdialog] .dlg-btn.primary')?.click())
+  await sleep(350)
+}
+
+// 첫 저장 — 알려진 문서가 없으므로 이름 프롬프트가 뜬다
+await openDocDropdown()
+await clickMenu('저장')
+await page.waitForSelector('[role=alertdialog]', { timeout: 3000 })
+check('첫 저장은 이름 프롬프트를 띄운다', true)
+await fillPrompt('테스트문서')
+await sleep(200)
+check('저장 성공 토스트', (await toasts()).includes('테스트문서'), await toasts())
+check('상태바에 문서 이름 표시', (await status()).includes('테스트문서'), await status())
+
+// 편집 → dirty 표시
+p1 = await cellBox(0, 1)
+await page.mouse.click(p1.x, p1.y)
+await page.keyboard.press('Enter')
+await press('Control+KeyA')
+await page.keyboard.type('dirty체크')
+await page.keyboard.press('Enter')
+await sleep(250)
+check('편집 후 dirty 표시(●)', (await status()).includes('●'), await status())
+
+// Ctrl+S — 이미 알려진 문서라 프롬프트 없이 조용히 덮어쓴다
+await press('Control+KeyS')
+await sleep(400)
+check('Ctrl+S는 프롬프트를 띄우지 않는다', (await page.$('[role=alertdialog]')) === null)
+check('덮어쓴 후 dirty 해제', !(await status()).includes('●'), await status())
+
+// 열 순서 변경 + 열 숨김 + 스마트 필터 적용 — 이 중 열 순서만 "열 상태"로 저장되고,
+// 숨김·필터는 "뷰 상태"라 저장되지 않아야 한다
+const h0b = await headerBox(0)
+const h2b = await headerBox(2)
+await page.mouse.move(h0b.x, h0b.y)
+await page.mouse.down()
+await page.mouse.move(h2b.x, h2b.y, { steps: 12 })
+await page.mouse.up()
+await sleep(350)
+const orderAfterDrag = await headerNames()
+check('열 순서 변경됨', orderAfterDrag[0] !== '주문번호', orderAfterDrag.join(','))
+
+hb = await headerBox(1)
+await page.mouse.click(hb.x, hb.y)
+await sleep(150)
+p1 = await cellBox(0, 1)
+await page.mouse.click(p1.x, p1.y, { button: 'right' })
+await page.waitForSelector('[role=menu]')
+await clickMenu('열 숨기기')
+await sleep(200)
+check('열 숨기기 적용', (await headerNames()).length === orderAfterDrag.length - 1, (await headerNames()).join(','))
+
+await setFilter('김하늘')
+await sleep(300)
+
+await press('Control+KeyS')
+await sleep(400)
+check('열 순서 변경 후에도 Ctrl+S는 덮어쓴다', (await page.$('[role=alertdialog]')) === null)
+
+// 새로고침 — 지금까지의 인메모리 상태를 모두 버리고 IndexedDB에서만 복원한다
+await page.reload({ waitUntil: 'load' })
+await page.waitForSelector('#app *')
+await page.waitForFunction(() => [...document.querySelectorAll('.doc-item')].some((b) => b.textContent.includes('테스트문서')), { timeout: 5000, polling: 100 })
+check('새로고침 후 DropZone에 저장된 문서 표시', true)
+await page.evaluate(() => {
+  ;[...document.querySelectorAll('.doc-item')].find((b) => b.textContent.includes('테스트문서')).click()
+})
+await page.waitForSelector('[role=grid]', { timeout: 5000 })
+await sleep(300)
+
+check('복원: 7열', (await headerNames()).length === 7, (await headerNames()).join(','))
+check('복원: 10행', (await status()).includes('10'), await status())
+check('복원: 열 순서 유지 (colOrder는 저장된다)', JSON.stringify(await headerNames()) === JSON.stringify(orderAfterDrag), (await headerNames()).join(','))
+check('복원: 숨김은 저장되지 않는다', !(await status()).includes('/'), await status())
+const filterVal = await page.$eval('input[aria-label="스마트 필터"]', (e) => e.value)
+check('복원: 스마트 필터는 저장되지 않는다', filterVal === '', JSON.stringify(filterVal))
+const custIdx = (await headerNames()).indexOf('고객명')
+check('복원: 편집한 값 유지', (await cellText(0, custIdx)) === 'dirty체크', String(await cellText(0, custIdx)))
+
+// 다른 이름으로 저장 — 같은 이름을 다시 입력하면 덮어쓰기 확인을 거친다
+await press('Control+Shift+KeyS')
+await page.waitForSelector('[role=alertdialog] input', { timeout: 3000 })
+await fillPrompt('테스트문서') // 지금 열려 있는 문서와 같은 이름
+await page.waitForSelector('[role=alertdialog]', { timeout: 3000 })
+check('중복 이름 확인 대화상자 등장', (await page.$eval('[role=alertdialog] .dlg-msg', (e) => e.textContent)).includes('테스트문서'))
+await settleConfirm(false) // 취소 — 이름 프롬프트가 다시 뜬다
+await fillPrompt('테스트문서2')
+await sleep(300)
+check('다른 이름으로 저장 성공', (await toasts()).includes('테스트문서2'), await toasts())
+
+await openDocDropdown()
+const openItemLabel = await page.$$eval('[role=menuitem]', (els) =>
+  els.map((e) => e.textContent).find((t) => t.includes('문서 열기')),
+)
+check('문서 메뉴에 저장된 문서 수 표시', openItemLabel?.includes('(2)'), openItemLabel)
+await clickMenu('문서 열기')
+await page.waitForSelector('[aria-label="저장된 문서"]', { timeout: 3000 })
+
+const pickerRows = await page.$$eval('[aria-label="저장된 문서"] .name', (els) => els.map((e) => e.textContent.trim()))
+check('피커에 문서 2개 표시', pickerRows.length === 2, pickerRows.join(','))
+const currentBadges = await page.$$eval('[aria-label="저장된 문서"] .tag', (els) =>
+  els.filter((e) => e.textContent.trim() === '현재').length,
+)
+check('현재 배지 1개', currentBadges === 1, String(currentBadges))
+
+await page.evaluate(() => {
+  const row = [...document.querySelectorAll('[aria-label="저장된 문서"] .row')].find((r) =>
+    r.querySelector('.name').textContent.trim() === '테스트문서',
+  )
+  row.querySelector('.del').click()
+})
+await page.waitForSelector('[role=alertdialog]', { timeout: 3000 })
+check('삭제 확인 대화상자 등장', true)
+await settleConfirm(true)
+await sleep(300)
+const pickerRowsAfter = await page.$$eval('[aria-label="저장된 문서"] .name', (els) => els.map((e) => e.textContent.trim()))
+check('삭제 후 1개로 감소', pickerRowsAfter.length === 1 && pickerRowsAfter[0] === '테스트문서2', pickerRowsAfter.join(','))
+
+await page.keyboard.press('Escape')
+await sleep(250)
+check('Escape로 피커 닫힘', (await page.$('[aria-label="저장된 문서"]')) === null)
+
+// ===================================================================
 group('대용량 (10만 행 × 25열, 28MB)')
 if (!existsSync(FIXTURE)) {
   check('fixture 존재', false, 'node fixtures/gen.mjs 100000 25 > fixtures/big.csv 실행 필요')
@@ -1557,6 +1701,55 @@ if (!existsSync(FIXTURE)) {
 
   const st = await status()
   check('상태바 100,000행 · 25열', st.includes('100,000') && st.includes('25'), st.slice(0, 76))
+
+  // 문서 저장을 텍스트 직렬화로 하기로 한 결정의 실측 증거: 대용량에서도 저장/복원이
+  // 되고, 그 소요 시간이 감내할 만한지를 여기서 잰다.
+  const docSaveT0 = Date.now()
+  await page.evaluate(() => {
+    ;[...document.querySelectorAll('.toolbar button')]
+      .find((b) => b.textContent.trim().startsWith('문서'))
+      .click()
+  })
+  await sleep(150)
+  await page.evaluate(() => {
+    ;[...document.querySelectorAll('[role=menuitem]')].find((b) => b.textContent.includes('저장')).click()
+  })
+  await page.waitForSelector('[role=alertdialog] input', { timeout: 5000 })
+  await sleep(150)
+  await page.click('[role=alertdialog] input')
+  await press('Control+KeyA')
+  await page.keyboard.type('대용량문서')
+  await page.evaluate(() => document.querySelector('[role=alertdialog] .dlg-btn.primary').click())
+  await page.waitForFunction(
+    () => [...document.querySelectorAll('.toast')].some((t) => t.textContent.includes('대용량문서')),
+    { timeout: 20000, polling: 100 },
+  )
+  const docSaveMs = Date.now() - docSaveT0
+  check('10만 행 문서 저장 완료', true, docSaveMs + 'ms')
+  check('10만 행 문서 저장 15초 이내', docSaveMs < 15000, docSaveMs + 'ms')
+
+  await page.reload({ waitUntil: 'load' })
+  await page.waitForSelector('#app *')
+  await page.waitForFunction(
+    () => [...document.querySelectorAll('.doc-item')].some((b) => b.textContent.includes('대용량문서')),
+    { timeout: 8000, polling: 100 },
+  )
+  const docOpenT0 = Date.now()
+  await page.evaluate(() => {
+    ;[...document.querySelectorAll('.doc-item')].find((b) => b.textContent.includes('대용량문서')).click()
+  })
+  await page.waitForFunction(() => document.querySelector('.bar')?.innerText.includes('100,000'), {
+    timeout: 60000,
+    polling: 100,
+  })
+  const docOpenMs = Date.now() - docOpenT0
+  check('10만 행 문서 열기 완료', true, docOpenMs + 'ms')
+  const stReopened = await status()
+  check(
+    '재오픈 후 상태바 100,000행 · 25열',
+    stReopened.includes('100,000') && stReopened.includes('25'),
+    stReopened.slice(0, 76),
+  )
 
   const domRows = await page.$$eval('.canvas .tr', (e) => e.length)
   const domCells = await page.$$eval('.canvas .td', (e) => e.length)

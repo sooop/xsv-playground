@@ -1,15 +1,17 @@
 /*
  * 디자인 방향: "정밀 계측기"
  *
- * 그래파이트 베이스 + 앰버 신호색. 전체를 모노스페이스로 통일했다 — 단일 HTML/오프라인
- * 제약으로 웹폰트를 쓸 수 없으니, 로컬에 있는 좋은 모노 폰트를 전면에 세워 계측 장비의
- * 성격을 만든다. 데이터 자체가 화면의 주인공이므로 장식은 최소로, 대비와 간격으로만 위계를 준다.
+ * 그래파이트 베이스 + 앰버 신호색. 데이터 그리드(셀·헤더·거터)는 모노스페이스로 계측 장비의
+ * 성격을 유지하고, 버튼/라벨/다이얼로그 등 일반 UI 텍스트는 가독성 좋은 UI 폰트를 쓴다.
+ * 단일 HTML/오프라인 제약으로 웹폰트는 쓰지 않고, 로컬에 설치되어 있다고 가정한 폰트만 나열한다.
  */
 
 :root {
   /* 로컬 폰트만 사용 (외부 요청 0건 유지) */
-  --font-mono: 'JetBrains Mono', 'Cascadia Code', 'Cascadia Mono', 'SF Mono', 'Menlo',
-    'DejaVu Sans Mono', 'Consolas', ui-monospace, monospace;
+  --font-ui: 'Pretendard', 'Pretendard Variable', -apple-system, 'Segoe UI', system-ui,
+    sans-serif;
+  --font-mono: 'Geist Mono', 'JetBrains Mono', 'Cascadia Code', 'Cascadia Mono', 'SF Mono',
+    'Menlo', 'DejaVu Sans Mono', 'Consolas', ui-monospace, monospace;
 
   --row-h: 28px;
   --header-h: 30px;
@@ -151,7 +153,7 @@ body {
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-size: var(--fs-ui);
   font-variant-ligatures: none;
   -webkit-font-smoothing: antialiased;
@@ -271,6 +273,7 @@ select {
   border-radius: 4px;
   background: var(--bg-raised);
   color: var(--text-dim);
+  font-family: var(--font-mono);
   font-size: 10px;
   line-height: 14px;
   text-align: center;
