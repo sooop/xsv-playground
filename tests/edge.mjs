@@ -4,13 +4,16 @@
  *
  *   npm run build && node tests/edge.mjs
  *
- * cp949 인코딩, 500칼럼, 매우 긴 셀, 전부 빈 칼럼, 헤더 없는 파일, 그리고
+ * cp949 인코딩, 500칼럼, 매우 긴 셀, 전부 빈 칼럼, 헤더 없는 파일, 엑셀 통합 문서, 그리고
  * 내보낸 CSV를 다시 불러 원본과 같은지(라운드트립) 확인한다.
+ *
+ * 엑셀 구간만은 SheetJS를 CDN에서 받으므로 **인터넷 연결이 필요하다**(그 외 전부 오프라인).
  */
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import puppeteer from 'puppeteer-core'
+import * as XLSX from 'xlsx'
 
 const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
 const DIST = resolve('dist/index.html')
@@ -63,7 +66,31 @@ const files = {
   'noheader.csv': Buffer.from('1,2,3\n4,5,6\n7,8,9\n', 'utf8'),
   'onecol.csv': Buffer.from('alpha\nbeta\ngamma\n', 'utf8'),
   'semicolon.csv': Buffer.from('a;b;c\n1;2;3\n4;5;6\n', 'utf8'),
+  // 시트 3장: 서식 있는 데이터 / 앞자리 0·불리언 / 빈 시트
+  'book.xlsx': (() => {
+    const wb = XLSX.utils.book_new()
+    const s1 = XLSX.utils.aoa_to_sheet([
+      ['이름', '단가', '주문일'],
+      ['김하늘', 89000, new Date(Date.UTC(2026, 0, 14))],
+      ['이준호', 42500, new Date(Date.UTC(2026, 0, 15))],
+    ])
+    s1.B2.z = s1.B3.z = '#,##0'
+    s1.C2.z = s1.C3.z = 'yyyy-mm-dd'
+    XLSX.utils.book_append_sheet(wb, s1, '주문')
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet([
+        ['code', 'flag'],
+        ['007', true],
+      ]),
+      '두번째',
+    )
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([[]]), '빈시트')
+    return XLSX.write(wb, { bookType: 'xlsx', type: 'buffer', cellDates: true })
+  })(),
 }
+// 확장자가 .csv인 진짜 엑셀 파일 — 매직 바이트 판정이 이기는지 본다
+files['mislabeled.csv'] = files['book.xlsx']
 for (const [name, buf] of Object.entries(files)) writeFileSync(resolve(TMP, name), buf)
 
 const browser = await puppeteer.launch({
@@ -196,6 +223,57 @@ if (typeof exported === 'string') {
     before.length + '행 vs ' + after.length + '행',
   )
   check('라운드트립 후 헤더 동일', (await headerNames()).join(',') === 'id,long,empty,quoted,tabbed', (await headerNames()).join(','))
+}
+
+// ===================================================================
+// 엑셀 통합 문서 — 이 구간만 SheetJS를 CDN에서 받는다
+console.log('\n[엑셀 통합 문서]')
+{
+  /** load()는 그리드를 기다리지만 여러 시트짜리는 선택 창이 먼저 뜬다 */
+  async function openFile(name) {
+    await page.goto(pathToFileURL(DIST).href, { waitUntil: 'load' })
+    await page.waitForSelector('#app *')
+    const input = await page.$('input[type=file]')
+    await input.uploadFile(resolve(TMP, name))
+  }
+  const pickSheet = async (i) => {
+    await page.$$eval('[role=listbox] .item', (els, k) => els[k].click(), i)
+    await page.waitForSelector('[role=grid]', { timeout: 20000 })
+    await sleep(400)
+  }
+
+  await openFile('book.xlsx')
+  // CDN 다운로드가 섞여 있어 넉넉히 기다린다
+  await page.waitForSelector('[role=listbox]', { timeout: 30000 })
+  const items = await page.$$eval('[role=listbox] .item', (e) =>
+    e.map((x) => x.textContent.replace(/\s+/g, ' ').trim()),
+  )
+  check('시트 3장을 목록으로 제시', items.length === 3, JSON.stringify(items))
+  check('빈 시트는 고를 수 없음', await page.$$eval('[role=listbox] .item', (e) => e[2].disabled))
+
+  await pickSheet(0)
+  check('헤더 인식', (await headerNames()).join(',') === '이름,단가,주문일', (await headerNames()).join(','))
+  check('숫자 서식 그대로', (await cellText(0, 1)) === '89,000', String(await cellText(0, 1)))
+  check('날짜 서식 그대로', (await cellText(0, 2)) === '2026-01-14', String(await cellText(0, 2)))
+  check('한글 셀 정상', (await cellText(1, 0)) === '이준호', String(await cellText(1, 0)))
+  check('상태바에 시트명·형식', (await status()).includes('주문') && (await status()).includes('xlsx'), await status())
+
+  // 툴바 시트 버튼으로 전환
+  const btn = await page.$$eval('header button', (els) =>
+    els.findIndex((e) => e.querySelector('.sheet-name')),
+  )
+  check('툴바에 시트 전환 버튼', btn >= 0, String(btn))
+  await page.evaluate((i) => document.querySelectorAll('header button')[i].click(), btn)
+  await page.waitForSelector('[role=listbox]', { timeout: 5000 })
+  await pickSheet(1)
+  check('시트 전환됨', (await headerNames()).join(',') === 'code,flag', (await headerNames()).join(','))
+  check('앞자리 0 보존', (await cellText(0, 0)) === '007', String(await cellText(0, 0)))
+
+  await openFile('mislabeled.csv')
+  await page.waitForSelector('[role=listbox]', { timeout: 30000 })
+  check('.csv 확장자여도 매직 바이트로 엑셀 인식', (await page.$$('[role=listbox] .item')).length === 3)
+  await pickSheet(0)
+  check('내용 정상', (await headerNames()).join(',') === '이름,단가,주문일', (await headerNames()).join(','))
 }
 
 console.log('\n[최종]')

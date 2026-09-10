@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { DocMeta } from '../data/docSnapshot'
+  import { FILE_ACCEPT } from '../parse/detect'
   import { ago, num } from '../util/format'
 
   interface Props {
@@ -72,7 +73,7 @@
     </div>
 
     <h1>xsv</h1>
-    <p class="tag">CSV · TSV 워크벤치</p>
+    <p class="tag">CSV · TSV · XLSX 워크벤치</p>
 
     {#if progress !== null}
       <div class="prog" role="progressbar" aria-valuenow={Math.round(progress * 100)}>
@@ -119,14 +120,20 @@
         </div>
       {/if}
 
-      <p class="note">모든 처리는 이 브라우저 안에서만 일어납니다 · 서버 전송 없음</p>
+      <p class="note">
+        모든 처리는 이 브라우저 안에서만 일어납니다 · 서버 전송 없음
+        <br />
+        <span class="note-sub">
+          엑셀 파일(.xlsx)은 처음 열 때 해석 라이브러리를 내려받으므로 인터넷 연결이 필요합니다
+        </span>
+      </p>
     {/if}
   </div>
 
   <input
     bind:this={fileEl}
     type="file"
-    accept=".csv,.tsv,.txt,.tab,text/csv,text/plain"
+    accept={FILE_ACCEPT}
     hidden
     onchange={(e) => {
       const f = e.currentTarget.files
@@ -227,7 +234,12 @@
     margin: 20px 0 0;
     color: var(--text-faint);
     font-size: 10.5px;
+    line-height: 1.7;
     letter-spacing: 0.02em;
+  }
+  .note-sub {
+    opacity: 0.75;
+    font-size: 10px;
   }
 
   .docs {

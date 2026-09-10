@@ -27,11 +27,18 @@
   import { SelectionStore } from './lib/data/selection.svelte'
   import { toggleSort } from './lib/data/sort'
   import { planJoin, planSplitToCols, planSplitToRows } from './lib/data/transform'
-  import type { ExportOptions, Op, Selection } from './lib/data/types'
+  import type { ExportOptions, Op, ParseResult, Selection } from './lib/data/types'
   import { View } from './lib/data/view.svelte'
   import { parseChunked } from './lib/parse/csv'
-  import { decodeAs, decodeBytes, detectDelimiter, finalize } from './lib/parse/detect'
-  import { isSheetJSLoaded } from './lib/parse/xlsx'
+  import {
+    FILE_ACCEPT,
+    decodeAs,
+    decodeBytes,
+    detectDelimiter,
+    finalize,
+    looksSpreadsheet,
+  } from './lib/parse/detect'
+  import { isSheetJSLoaded, readWorkbook, type WorkbookHandle } from './lib/parse/xlsx'
   import ColumnFilterMenu from './lib/ui/ColumnFilterMenu.svelte'
   import ColumnManager from './lib/ui/ColumnManager.svelte'
   import ContextMenu, { type MenuItem } from './lib/ui/ContextMenu.svelte'
@@ -44,6 +51,7 @@
   import Grid from './lib/ui/Grid.svelte'
   import JoinDialog, { type JoinResult } from './lib/ui/JoinDialog.svelte'
   import ReplaceDialog from './lib/ui/ReplaceDialog.svelte'
+  import SheetPicker from './lib/ui/SheetPicker.svelte'
   import ShortcutHelp from './lib/ui/ShortcutHelp.svelte'
   import SmartFilter from './lib/ui/SmartFilter.svelte'
   import SplitDialog, { type SplitResult } from './lib/ui/SplitDialog.svelte'
@@ -131,6 +139,10 @@
     await tick()
     try {
       const buf = await file.arrayBuffer()
+      if (looksSpreadsheet(file.name, new Uint8Array(buf, 0, Math.min(8, buf.byteLength)))) {
+        await loadWorkbook(buf, file.name)
+        return
+      }
       lastBuffer = buf
       const dec = decodeBytes(buf)
       encoding = dec.encoding
@@ -174,13 +186,8 @@
     await tick()
 
     const result = finalize(raw, delim, null, encodingBanner)
-    ds.loadParsed(result, fileName)
-
-    view.clearAll()
-    sel.clear()
-    history.clear()
-    currentDoc = null // 파일을 열면(붙여넣기·샘플 포함) 저장된 문서와의 연결이 끊긴다
-    progress = null
+    workbook = null
+    await applyParsed(result, fileName)
 
     if (result.rows.length === 0) {
       toast('데이터 행이 없습니다', 'warn')
@@ -190,6 +197,20 @@
     if (result.raggedRows > 0) bits.push(`불규칙 행 ${num(result.raggedRows)}개 패딩`)
     if (!result.hasHeader) bits.push('헤더 없음으로 판단')
     toast(bits.join(' · '), 'ok')
+  }
+
+  /**
+   * 파싱 결과를 그리드에 올리고 딸린 상태를 초기화한다 — CSV·붙여넣기·엑셀 시트가 공유한다.
+   * 통합 문서 핸들만은 여기서 건드리지 않는다(시트 전환은 데이터만 갈아끼우기 때문).
+   */
+  async function applyParsed(result: ParseResult, fileName: string): Promise<void> {
+    ds.loadParsed(result, fileName)
+
+    view.clearAll()
+    sel.clear()
+    history.clear()
+    currentDoc = null // 파일을 열면(붙여넣기·샘플 포함) 저장된 문서와의 연결이 끊긴다
+    progress = null
 
     // 그리드가 즉시 키보드를 받도록
     await tick()
@@ -201,6 +222,107 @@
     encoding = 'utf-8'
     encodingBanner = false
     void loadText(text, '')
+  }
+
+  // --- 엑셀 통합 문서 ---
+  //
+  // 이 앱에서 네트워크가 필요한 유일한 경로다(SheetJS를 CDN에서 받는다). 통합 문서 핸들은
+  // 메모리에만 두고 저장 문서에는 담지 않는다 — 저장되는 것은 언제나 지금 보고 있는 한 시트의
+  // 표다. 파일을 다시 열지 않고도 시트를 오갈 수 있도록 핸들을 붙들고 있는 것이 목적이다.
+  let workbook = $state.raw<{
+    handle: WorkbookHandle
+    fileName: string
+    /** 지금 그리드에 올라와 있는 시트. 아직 고르지 않았으면 null */
+    sheet: string | null
+  } | null>(null)
+  let showSheetPicker = $state(false)
+
+  async function loadWorkbook(buf: ArrayBuffer, fileName: string): Promise<void> {
+    progress = 0.1
+    progressLabel = isSheetJSLoaded()
+      ? `${fileName} 여는 중…`
+      : 'SheetJS를 CDN에서 받는 중… (엑셀 파일 열기에 최초 1회만 필요)'
+    await tick()
+
+    const handle = await readWorkbook(buf)
+    const withData = handle.sheets.filter((s) => s.rows > 0)
+    if (withData.length === 0) {
+      progress = null
+      toast('모든 시트가 비어 있습니다', 'warn')
+      return
+    }
+
+    workbook = { handle, fileName, sheet: null }
+    if (withData.length === 1) {
+      await openSheet(withData[0].name)
+      return
+    }
+    // 여러 시트 — 어느 것을 볼지는 사용자가 정한다
+    progress = null
+    showSheetPicker = true
+  }
+
+  /** 통합 문서의 시트 하나를 그리드에 올린다. */
+  async function openSheet(name: string): Promise<void> {
+    const wb = workbook
+    if (!wb) return
+    showSheetPicker = false
+    progress = 0.3
+    progressLabel = `‘${name}’ 시트 변환 중…`
+    await tick()
+
+    const matrix = wb.handle.toMatrix(name)
+
+    progressLabel = '정리 중…'
+    progress = 0.95
+    await tick()
+
+    // 통합 문서에는 구분자가 없다 — 내보내기 기본값으로만 쓰이므로 쉼표로 둔다
+    const result = finalize(matrix, ',', null, false)
+    lastBuffer = null
+    encoding = formatLabel(wb.fileName)
+    encodingBanner = false
+    workbook = { ...wb, sheet: name }
+    await applyParsed(result, wb.fileName)
+
+    const bits: string[] = []
+    if (wb.handle.sheets.length > 1) bits.push(`‘${name}’ 시트`)
+    bits.push(`${num(result.rows.length)}행 × ${result.width}열`)
+    if (!result.hasHeader) bits.push('헤더 없음으로 판단')
+    toast(bits.join(' · '), 'ok')
+  }
+
+  /** 시트 전환 — 지금 시트에서 편집한 것이 있으면 잃기 전에 확인한다. */
+  async function requestSheet(name: string): Promise<void> {
+    if (workbook?.sheet === name) {
+      showSheetPicker = false
+      return
+    }
+    if (history.canUndo) {
+      const ok = await dialogs.confirm({
+        title: '시트를 바꿀까요?',
+        message: '지금 시트에서 편집한 내용은 사라집니다.',
+        detail: '남겨야 한다면 먼저 내보내거나 문서로 저장하세요.',
+        okLabel: '바꾸기',
+        tone: 'warn',
+      })
+      if (!ok) return
+    }
+    await openSheet(name)
+  }
+
+  function closeSheetPicker(): void {
+    showSheetPicker = false
+    // 아직 아무 시트도 고르지 않은 채 취소했다면 이 통합 문서의 내용은 화면에 없다 —
+    // 핸들을 버려서 (이전 데이터와 무관한) 시트 전환 버튼이 남지 않게 한다
+    if (workbook?.sheet === null) workbook = null
+  }
+
+  /** 상태바의 형식 표시 — 통합 문서는 인코딩 대신 확장자를 보여준다. */
+  function formatLabel(fileName: string): string {
+    const dot = fileName.lastIndexOf('.')
+    const ext = dot > 0 ? fileName.slice(dot + 1).toLowerCase() : ''
+    return ext || 'xlsx'
   }
 
   function tick(): Promise<void> {
@@ -975,6 +1097,7 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
     sel.clear()
     history.clear()
     lastBuffer = null
+    workbook = null
     encoding = 'utf-8'
     encodingBanner = false
     progress = null
@@ -1341,6 +1464,7 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
         showHelp ||
         showReplace ||
         showDocPicker ||
+        showSheetPicker ||
         splitTarget !== null ||
         joinTargets
       ) {
@@ -1349,6 +1473,7 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
         showHelp = false
         showReplace = false
         showDocPicker = false
+        if (showSheetPicker) closeSheetPicker()
         splitTarget = null
         joinTargets = null
       } else if (find.open) {
@@ -1397,6 +1522,17 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
       <span class="divider"></span>
 
       <button class="btn" onclick={() => fileInput?.click()} title="파일 열기 (Ctrl+O)">열기</button>
+
+      {#if workbook && workbook.handle.sheets.length > 1}
+        <button
+          class="btn"
+          onclick={() => (showSheetPicker = true)}
+          title="통합 문서의 다른 시트 보기 ({workbook.handle.sheets.length}개)"
+        >
+          <span class="sheet-name">{workbook.sheet ?? '시트'}</span>
+          <svg viewBox="0 0 8 5" width="7" height="5" aria-hidden="true"><path d="M0 0l4 4.4L8 0z" fill="currentColor" /></svg>
+        </button>
+      {/if}
 
       <button
         class="btn"
@@ -1579,6 +1715,7 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
       {view}
       {sel}
       {encoding}
+      sheet={workbook?.sheet ?? null}
       docName={currentDoc?.name ?? null}
       {docDirty}
       onShowAllHidden={showAllHidden}
@@ -1600,7 +1737,7 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
 <input
   bind:this={fileInput}
   type="file"
-  accept=".csv,.tsv,.txt,.tab,text/csv,text/plain"
+  accept={FILE_ACCEPT}
   hidden
   onchange={(e) => {
     const f = e.currentTarget.files
@@ -1608,6 +1745,16 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
     e.currentTarget.value = ''
   }}
 />
+
+{#if showSheetPicker && workbook}
+  <SheetPicker
+    fileName={workbook.fileName}
+    sheets={workbook.handle.sheets}
+    current={workbook.sheet}
+    onPick={(n) => void requestSheet(n)}
+    onClose={closeSheetPicker}
+  />
+{/if}
 
 {#if menu}
   <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => (menu = null)} />
@@ -1732,6 +1879,16 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
   .btn.on {
     color: var(--accent);
     background: var(--accent-soft);
+  }
+
+  /* 시트명은 얼마든지 길 수 있다 — 툴바를 밀어내지 않게 잘라 준다 */
+  .sheet-name {
+    display: inline-block;
+    max-width: 130px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
   }
 
   main {

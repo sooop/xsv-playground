@@ -9,10 +9,12 @@ import {
   finalize,
   looksDate,
   looksNumeric,
+  looksSpreadsheet,
   normalizeHeader,
   parseNumeric,
 } from '../src/lib/parse/detect'
 import { quoteField, serialize, toHtmlTable, toTsv } from '../src/lib/parse/serialize'
+import { trimMatrix } from '../src/lib/parse/xlsx'
 
 describe('CsvParser', () => {
   it('기본 행/필드 분리', () => {
@@ -354,5 +356,72 @@ describe('decodeBytes', () => {
     const r = decodeBytes(bytes.buffer as ArrayBuffer)
     expect(r.encoding).toBe('cp949')
     expect(r.text).toBe('한글,1')
+  })
+})
+
+describe('looksSpreadsheet', () => {
+  const head = (...b: number[]) => new Uint8Array(b)
+  const ZIP = head(0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0)
+  const OLE2 = head(0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1)
+  const TEXT = new TextEncoder().encode('a,b,c\n1,')
+
+  it('확장자로 인식', () => {
+    for (const n of ['x.xlsx', 'X.XLSM', 'a.xlsb', 'old.xls', 'calc.ods']) {
+      expect(looksSpreadsheet(n, TEXT)).toBe(true)
+    }
+  })
+
+  it('CSV/TSV는 아니다', () => {
+    for (const n of ['a.csv', 'a.tsv', 'a.txt', 'noext']) {
+      expect(looksSpreadsheet(n, TEXT)).toBe(false)
+    }
+  })
+
+  it('매직 바이트가 확장자를 이긴다', () => {
+    // 엑셀 파일에 .csv 확장자가 붙어 있어도 스프레드시트로 연다
+    expect(looksSpreadsheet('mislabeled.csv', ZIP)).toBe(true)
+    expect(looksSpreadsheet('mislabeled.csv', OLE2)).toBe(true)
+  })
+
+  it('짧은 파일에서 터지지 않는다', () => {
+    expect(looksSpreadsheet('a.csv', head(0x50))).toBe(false)
+  })
+})
+
+describe('trimMatrix', () => {
+  it('끝쪽 빈 행·빈 열을 떼어낸다', () => {
+    expect(
+      trimMatrix([
+        ['a', 'b', '', ''],
+        ['1', '2', '', ''],
+        ['', '', '', ''],
+      ]),
+    ).toEqual([
+      ['a', 'b'],
+      ['1', '2'],
+    ])
+  })
+
+  it('중간의 빈 행·빈 열은 남긴다', () => {
+    expect(
+      trimMatrix([
+        ['a', '', 'c'],
+        ['', '', ''],
+        ['1', '', '3'],
+      ]),
+    ).toEqual([
+      ['a', '', 'c'],
+      ['', '', ''],
+      ['1', '', '3'],
+    ])
+  })
+
+  it('전부 비었으면 빈 배열', () => {
+    expect(trimMatrix([['', ''], ['']])).toEqual([])
+    expect(trimMatrix([])).toEqual([])
+  })
+
+  it('짧은 행은 그대로 둔다 (패딩은 finalize의 몫)', () => {
+    expect(trimMatrix([['a', 'b'], ['1']])).toEqual([['a', 'b'], ['1']])
   })
 })

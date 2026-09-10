@@ -9,8 +9,10 @@
     ds: Dataset
     view: View
     sel: SelectionStore
-    /** 감지된 인코딩 (표시용) */
+    /** 감지된 인코딩, 또는 통합 문서면 파일 형식 (표시용) */
     encoding: string
+    /** 엑셀 통합 문서에서 온 데이터면 시트 이름 — 아니면 null */
+    sheet: string | null
     /** 브라우저에 저장된 문서 이름 — 저장된 적 없으면 null */
     docName: string | null
     /** 저장 이후 편집이 있었는지 (알려진 공백은 dataset.svelte.ts의 docDirty 주석 참고) */
@@ -18,7 +20,7 @@
     /** 숨김 배지 클릭 시 전체 해제 */
     onShowAllHidden: () => void
   }
-  let { ds, view, sel, encoding, docName, docDirty, onShowAllHidden }: Props = $props()
+  let { ds, view, sel, encoding, sheet, docName, docDirty, onShowAllHidden }: Props = $props()
 
   /** 선택 영역의 숫자 통계 — 저비용 고효용. 셀이 너무 많으면 건너뛴다. */
   const MAX_STAT_CELLS = 500_000
@@ -123,7 +125,12 @@
     <span class="divider"></span>
   {/if}
 
-  <span class="seg faint">{delimiterName(ds.delimiter)}</span>
+  <!-- 통합 문서에는 구분자가 없다 — 그 자리에 어느 시트인지를 보여주는 편이 쓸모 있다 -->
+  {#if sheet}
+    <span class="seg faint file" title="통합 문서의 시트">{sheet}</span>
+  {:else}
+    <span class="seg faint">{delimiterName(ds.delimiter)}</span>
+  {/if}
   <span class="seg faint">{encoding}</span>
   {#if docName}
     <span class="divider"></span>

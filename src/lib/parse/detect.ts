@@ -3,6 +3,38 @@ import { CsvParser } from './csv'
 
 const CANDIDATES: Delimiter[] = [',', '\t', ';', '|']
 
+/** SheetJS로 읽을 수 있는 스프레드시트 확장자. */
+export const SPREADSHEET_EXTS = ['.xlsx', '.xlsm', '.xlsb', '.xls', '.ods'] as const
+
+/** 파일 선택 대화상자의 `accept` 값 — 텍스트 표와 스프레드시트 전부. */
+export const FILE_ACCEPT = ['.csv', '.tsv', '.txt', '.tab', ...SPREADSHEET_EXTS, 'text/csv', 'text/plain'].join(',')
+
+/**
+ * 스프레드시트 파일인지 판정한다.
+ *
+ * 확장자보다 **매직 바이트를 우선**한다 — xlsx/xlsm/xlsb/ods는 ZIP(`PK\x03\x04`),
+ * 레거시 xls는 OLE2 복합 문서(`D0CF11E0…`)로 시작하며, 텍스트 CSV가 이 바이트로 시작하는
+ * 일은 없다. 확장자가 `.csv`로 잘못 붙은 엑셀 파일도 이 규칙이면 제대로 열린다.
+ *
+ * @param head 파일 앞부분 바이트 (8바이트면 충분)
+ */
+export function looksSpreadsheet(name: string, head: Uint8Array): boolean {
+  if (isZip(head) || isOle2(head)) return true
+  const lower = name.toLowerCase()
+  return SPREADSHEET_EXTS.some((ext) => lower.endsWith(ext))
+}
+
+function isZip(b: Uint8Array): boolean {
+  return b.length >= 4 && b[0] === 0x50 && b[1] === 0x4b && b[2] === 0x03 && b[3] === 0x04
+}
+
+const OLE2_SIG = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]
+
+function isOle2(b: Uint8Array): boolean {
+  if (b.length < OLE2_SIG.length) return false
+  return OLE2_SIG.every((v, i) => b[i] === v)
+}
+
 /**
  * 구분자 추론.
  *
