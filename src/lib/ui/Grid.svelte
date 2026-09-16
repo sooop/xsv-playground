@@ -242,6 +242,13 @@
     }
   }
 
+  /** 포인터가 본문의 스크롤바 위(콘텐츠 영역 바깥)에 있는지 */
+  function onScrollbar(e: { clientX: number; clientY: number }): boolean {
+    if (!bodyEl) return false
+    const rect = bodyEl.getBoundingClientRect()
+    return e.clientX - rect.left >= bodyEl.clientWidth || e.clientY - rect.top >= bodyEl.clientHeight
+  }
+
   /** 드래그가 뷰포트 가장자리에 닿으면 계속 스크롤한다 */
   function startAutoScroll(): void {
     if (autoScrollTimer !== null) return
@@ -251,14 +258,17 @@
         return
       }
       const rect = bodyEl.getBoundingClientRect()
+      // 스크롤바 두께를 뺀 실제 콘텐츠 영역을 기준으로 가장자리를 판정한다
+      const right = rect.left + bodyEl.clientWidth
+      const bottom = rect.top + bodyEl.clientHeight
       const EDGE = 36
       const { clientX: px, clientY: py } = lastPointer
       let dx = 0
       let dy = 0
       if (py < rect.top + EDGE) dy = -Math.min(28, (rect.top + EDGE - py) / 2)
-      else if (py > rect.bottom - EDGE) dy = Math.min(28, (py - rect.bottom + EDGE) / 2)
+      else if (py > bottom - EDGE) dy = Math.min(28, (py - bottom + EDGE) / 2)
       if (px < rect.left + EDGE) dx = -Math.min(28, (rect.left + EDGE - px) / 2)
-      else if (px > rect.right - EDGE) dx = Math.min(28, (px - rect.right + EDGE) / 2)
+      else if (px > right - EDGE) dx = Math.min(28, (px - right + EDGE) / 2)
       if (dx === 0 && dy === 0) return
       bodyEl.scrollTop += dy
       bodyEl.scrollLeft += dx
@@ -270,6 +280,7 @@
 
   function onBodyPointerDown(e: PointerEvent): void {
     if (e.button === 2) return // 컨텍스트 메뉴는 별도 처리
+    if (onScrollbar(e)) return // 스크롤바 드래그를 셀 선택으로 오인하지 않는다
     const hit = cellAtEvent(e)
     if (!hit) return
     rootEl?.focus()
@@ -301,6 +312,7 @@
   }
 
   function onBodyDblClick(e: MouseEvent): void {
+    if (onScrollbar(e)) return
     const hit = cellAtEvent(e)
     if (!hit) return
     sel.selectCell(hit.r, hit.c)
