@@ -31,5 +31,9 @@
   },
   "allowScripts": {
     "esbuild@0.28.1": true
+  },
+  "dependencies": {
+    "dompurify": "^3.4.15",
+    "marked": "^18.0.13"
   }
 }

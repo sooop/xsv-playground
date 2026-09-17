@@ -1,22 +1,45 @@
-# xsv-playground — 단일 HTML CSV/TSV/XLSX 조작 도구
+# xsv-playground — 단일 HTML CSV · jq · Markdown 워크벤치
 
-큰 CSV/TSV/XLSX를 빠르게 훑고, 찾고, 필요한 부분만 잘라내는 도구. **빌드 결과는
-`dist/index.html` 파일 하나**이고, 더블클릭해서 열면 그대로 동작한다. 엑셀이 설치되지 않은
-기기에서 엑셀 파일 내용을 확인하는 용도로도 쓴다. 데이터는 브라우저 밖으로 나가지 않는다.
+큰 CSV/TSV/XLSX를 훑고 잘라내는 **CSV 모드**, JSON에 jq 쿼리를 걸어 보는 **jq 모드**, 마크다운을
+읽고 고치는 **Markdown 모드** — 세 도구가 **`dist/index.html` 파일 하나**에 들어 있고, 더블클릭해서
+열면 그대로 동작한다. 데이터는 브라우저 밖으로 나가지 않는다.
 
-CSV/TSV를 다루는 모든 기능은 외부 네트워크 요청이 **0건**이라 오프라인·사내 폐쇄망에 파일
-하나만 전달해도 된다. 유일한 예외는 **XLSX 열기와 내보내기**다 — 이 라이브러리(SheetJS, 약
-1MB)를 최종 HTML에 담는 대신, 엑셀 파일을 실제로 열거나 XLSX 형식을 고른 시점에 CDN에서
-받아온다. 그 덕에 XLSX를 한 번도 안 쓰면 파일이 훨씬 가볍고, 쓰는 순간에만(그것도 세션당 최초
-1회만) 인터넷 연결이 필요하다.
+CSV/TSV를 다루는 모든 기능은 외부 네트워크 요청이 **0건**이라 오프라인·사내 폐쇄망에 파일 하나만
+전달해도 된다. 무거운 라이브러리(SheetJS·jq-web·highlight.js·Mermaid·KaTeX)는 최종 HTML에 담지
+않고 **그 기능을 실제로 쓰는 시점에 CDN에서 받아온다** — 세션당 최초 1회만 인터넷이 필요하고, 한
+번도 안 쓰면 파일이 가볍다(아래 「네트워크 정책」).
 
 ```
 npm install
 npm run dev            # 개발 서버
-npm run build          # → dist/index.html (약 230KB, 단일 파일)
+npm run build          # → dist/index.html (약 600KB, gzip 186KB, 단일 파일)
 ```
 
-## 기능
+## 셸 — 세 모드가 한 파일에 사는 방식
+
+상단 탭(`CSV` / `jq` / `Markdown`)으로 모드를 오간다. **모드당 문서 하나**를 다루고, 오가도 각
+모드의 상태(스크롤 위치까지)는 그대로 남는다 — 비활성 모드는 DOM에서 빼는 게 아니라 `visibility`로
+숨기기 때문이다. 한 번도 열지 않은 모드는 마운트조차 하지 않는다.
+
+**파일 열기** · 창 어디에 떨어뜨려도, 툴바의 "열기"나 `Ctrl+O`로 골라도 셸이 **파일 앞 64KB만 읽어
+종류를 판정**하고 맞는 모드로 열어 준다. 매직 바이트(ZIP/OLE2 = 엑셀) → 확장자(`.md .json .jsonl
+.csv .tsv …`) → 내용(`{`/`[`로 시작하면 JSON, 헤딩·펜스·표가 있으면 마크다운, 구분자로 쪼갰을 때
+필드 수가 일정하면 표) 순서라 `.txt`나 확장자 없는 파일도 제대로 간다. 붙여넣기(`Ctrl+V`)는 지금
+보고 있는 모드가 받는다.
+
+**도구 간 연결** · CSV 표를 JSON 객체 배열로 jq 입력에 보내기(도구 메뉴 / 우클릭 — 전체·보이는
+부분·선택 영역) · jq의 CSV 출력을 CSV 모드로 보내기(출력 패널 "CSV 모드로") · 마크다운의
+```` ```csv ```` / ```` ```tsv ```` / ```` ```json ```` 코드블록에 붙은 "CSV로 열기" / "jq로 열기".
+대상 모드에 문서가 이미 있으면 덮어쓸지 공통 다이얼로그로 묻는다.
+
+**단축키** · 셸이 잡는 것은 **모드 전환 `Ctrl+Shift+1/2/3`과 `Ctrl+O`** 뿐이다. 나머지는 각 모드의
+것이고 **그 모드가 활성일 때만** 동작한다(jq 모드에서 `/`를 눌러도 CSV 필터로 새지 않는다). 확인
+창이 떠 있는 동안에는 어느 모드도 키를 받지 않는다.
+
+테마는 기본적으로 **시스템 설정을 따르고**(`prefers-color-scheme`), 탭바 우측 버튼으로 시스템 →
+라이트 → 다크 순환한다. 세 모드가 같은 디자인 토큰(`src/app.css`)과 같은 다이얼로그·토스트를 쓴다.
+
+## CSV 모드
 
 **입력** · 파일 드래그&드롭, 파일 선택, 붙여넣기(Ctrl+V) · 구분자 자동 인식(`,` `\t` `;` `|`) ·
 헤더 행 자동 판단 및 수동 토글 · UTF-8/BOM 처리, 깨진 글자 감지 시 **cp949 재해석** 제안 ·
@@ -39,11 +62,11 @@ npm run build          # → dist/index.html (약 230KB, 단일 파일)
 자연 정렬·우측 정렬·색 구분 · 칼럼 필터(고유값 체크박스 + 숫자 조건식) · 칼럼 폭 조절,
 열 순서 드래그 변경
 
-**숨기기 · 열 관리** · 선택한 열/행 숨기기 · **빈 열 모두 숨기기 / 모두 삭제** (한 번에) ·
-툴바의 **열 관리** 패널에서 전체 칼럼 목록을 보며 스위치로 on/off, 이름 검색 후 "표시된 항목만
-일괄 숨기기", 빈 열 일괄 숨기기 · 상태바의 숨김 배지를 누르면 전체 해제. 숨기기는 필터·정렬과
-같은 **뷰 상태**라 Undo 대상이 아니고, 데이터는 그대로 남는다(삭제와 구분됨). 마지막 남은 한
-열은 숨길 수 없다(빈 화면 방지)
+**숨기기 · 열 관리** · 선택한 열/행 숨기기 · **빈 열 모두 숨기기 / 모두 삭제** (한 번에) · 툴바의
+**열 관리** 패널에서 전체 칼럼 목록을 보며 스위치로 on/off, 이름 검색 후 "표시된 항목만 일괄
+숨기기", 빈 열 일괄 숨기기 · 상태바의 숨김 배지를 누르면 전체 해제. 숨기기는 필터·정렬과 같은
+**뷰 상태**라 Undo 대상이 아니고, 데이터는 그대로 남는다(삭제와 구분됨). 마지막 남은 한 열은
+숨길 수 없다(빈 화면 방지)
 
 **스마트 필터** (`/` 로 진입)
 
@@ -85,7 +108,7 @@ Alt+R            정규식 모드 (설정이 기억됨)
 C E      복사 / 내용 지우기          N M   빈 열 모두 숨기기 / 삭제
 A B      위에 / 아래에 행 삽입        S J   열 나누기 / 열 결합
 W H D    행 복제 / 숨기기 / 삭제      U     숨김 모두 해제
-L R      왼쪽에 / 오른쪽에 열 삽입
+L R      왼쪽에 / 오른쪽에 열 삽입    G     jq로 보내기
 P I X    열 복제 / 숨기기 / 삭제
 ```
 
@@ -94,10 +117,7 @@ P I X    열 복제 / 숨기기 / 삭제
 그 행·열이 먼저 선택되므로, **행 번호 우클릭 → `D`** 한 번으로 행 삭제까지 간다.
 
 확인·경고는 브라우저 기본 `confirm`/`alert`을 쓰지 않고 **Promise 기반 공통 다이얼로그**로
-띄운다(`src/lib/ui/dialog/`). 폴더째 복사하면 다른 프로젝트에서도 그대로 쓸 수 있다.
-
-테마는 기본적으로 **시스템 설정을 따르고**(`prefers-color-scheme`), 툴바 버튼으로
-시스템 → 라이트 → 다크 순환한다.
+띄운다(`src/lib/ui/dialog/`). 세 모드가 이 하나를 공유한다.
 
 **내보내기** (Ctrl+E) · 범위 3종(전체 / 보이는 부분 / 선택 영역) × 대상 2종(파일 / 클립보드) ×
 형식 3종(CSV / TSV / XLSX) · 헤더 포함, 칼럼 순서, 인용 규칙, 개행, BOM 선택 ·
@@ -109,15 +129,97 @@ Ctrl+C는 `text/plain`(TSV)과 `text/html`(표)을 함께 기록해 Excel·Sheet
 브라우저(IndexedDB)에 저장해두고 나중에 다시 불러온다. 파일이 아니라 브라우저 안에 남기 때문에
 **붙여넣기로 만든 표처럼 원본 파일이 아예 없는 데이터도 나중에 다시 찾아볼 수 있다.** `Ctrl+S`는
 알려진 문서면 조용히 덮어쓰고, 처음 저장이거나 `Ctrl+Shift+S`(다른 이름으로 저장)면 이름
-프롬프트가 뜬다 — 붙여넣은 데이터는 파일명이 없으므로 저장 시점에 날짜·시각이 들어간 이름을
-제안하고, 그 자리에서 원하는 이름으로 바꿀 수 있다. 저장되는 것은 **데이터와 열 상태**(열
-순서·폭·타입)뿐이고, 정렬·필터·숨김 같은 뷰 상태와 되돌리기 기록은 저장하지 않는다 — 문서를 여는
-것은 파일을 여는 것과 똑같이 동작한다. 빈 상태 화면(DropZone)에도 저장된 문서 목록이 떠서 파일을
-새로 열지 않고 바로 이어서 작업할 수 있다.
+프롬프트가 뜬다. 저장되는 것은 **데이터와 열 상태**(열 순서·폭·타입)뿐이고, 정렬·필터·숨김 같은
+뷰 상태와 되돌리기 기록은 저장하지 않는다 — 문서를 여는 것은 파일을 여는 것과 똑같이 동작한다.
+빈 상태 화면(DropZone)에도 저장된 문서 목록이 떠서 파일을 새로 열지 않고 바로 이어서 작업할 수 있다.
 
 `?` 를 누르면 전체 단축키 목록이 나온다.
 
-## 측정된 성능
+## jq 모드
+
+세 패널(입력 · 쿼리 · 출력)과 그 사이의 드래그 스플리터(비율은 기억된다).
+
+**입력** · JSON/텍스트 붙여넣기, 파일 드롭·열기, `Format`(들여쓰기 — 큰 입력은 워커에서) · CSV/TSV로
+보이는 텍스트는 **"Parse as CSV"** 한 번으로 객체 배열 JSON이 된다 · 로그처럼 JSON이 섞인 텍스트는
+**Transform**(`Ctrl+Shift+T`)으로 JSON 후보를 추출하고, 문자열 안에 JSON이 다시 들어 있는
+필드(stringified)는 트리에서 골라 **unstringify** — 미리보기를 보고 적용하며, 적용 전 상태로
+되돌리는 Undo가 붙는다 · 입력 히스토리(최근 300건, 내용 해시로 중복 제거, IndexedDB) · 입력 안
+**찾기**(정규식, 매치 위치로 점프, 2MB 초과 시 대신 범용 검색 jq 쿼리를 쿼리 패널에 넣어 준다)
+
+**쿼리** · `Ctrl+Enter`로 실행, 기본은 **자동 실행**(입력 크기에 따라 300~1000ms 디바운스, 3MB
+초과 시 자동 실행이 꺼지고 안내) · **자동완성** — 현재 컨텍스트의 필드명(`.users[].` 뒤에서 그
+객체의 키), `$변수`, 객체 구성 축약형 `{name, a|`, 함수 시그니처·설명·예제 팝업, `Tab`으로
+zsh처럼 후보를 순환하고 `Esc`로 원래 단어로 복원, 인자 있는 함수는 괄호까지 넣어 준다 · 쿼리
+히스토리(100건)와 **저장 쿼리**(이름 붙여 보관, JSON으로 내보내기/가져오기) · **스니펫**(자주
+쓰는 레시피)과 **문법 참조**(카테고리별 예제 — 클릭하면 현재 쿼리 뒤에 `|`로 이어 붙인다) ·
+**커맨드 팰릿** `Ctrl+K`(명령·스니펫·최근 쿼리 퍼지 검색)
+
+**출력** · JSON(가상 스크롤 텍스트 뷰 + 검색) / **CSV(그리드)** 전환 — 그리드는 CSV 모드와 **같은
+Grid 컴포넌트를 읽기 전용으로** 쓰므로 정렬·칼럼 필터·열 관리·숨기기·복사·찾기·내보내기(CSV/TSV/XLSX)가
+전부 된다 · 에러가 나면 이전 결과를 지우지 않고 흐리게 남긴 채 "이전 결과" 표시 · 출력 패널
+최대화(`Ctrl+Shift+M`, `Esc`로 복귀) · **"CSV 모드로"** 버튼으로 결과 표를 CSV 모드에 넘긴다
+
+**jq 엔진** · jq-web(WebAssembly)을 **처음 쿼리를 실행하는 시점에** CDN에서 받아 전용 워커에서
+돈다(메인 스레드가 막히지 않는다). 워커 생성이 실패한 환경에서만 메인 스레드 폴백을 쓴다.
+인터넷이 없으면 쿼리 실행만 실패하고 입력 정리·Transform·히스토리는 그대로 동작한다.
+
+`Ctrl+1/2/3`으로 패널 포커스, `F6`/`Shift+F6`으로 순환, `?`로 단축키 목록.
+
+## Markdown 모드
+
+**열기** · 파일 드롭·열기, 붙여넣기(`Ctrl+V` → "붙여넣은 문서 시각" 이름으로 저장) · 왼쪽
+사이드바에 **열람 이력**(최근 20개, IndexedDB — 파일이 아니라 브라우저에 남으므로 붙여넣은
+문서도 다시 찾을 수 있다)
+
+**읽기** · 헤딩 앵커, 표, 체크박스, 이미지 클릭 시 **라이트박스**(휠로 확대) · 코드블록에 언어
+라벨·**복사** 버튼, ```` ```csv/tsv/json ```` 블록에는 **"CSV로 열기" / "jq로 열기"** · 구문
+강조는 highlight.js를 **첫 코드블록이 화면에 들어올 때** CDN에서 받아 적용하고(미포함 언어는
+언어 팩을 추가로 시도), 색은 앱 토큰에 맞춘 자체 팔레트라 라이트/다크가 그리드와 같은 계열이다 ·
+**Mermaid** 다이어그램과 **KaTeX** 수식도 처음 쓰는 시점에 CDN에서 받아 렌더하며 테마를 바꾸면
+다시 그린다 · 오른쪽 **목차** 패널(현재 위치 강조) · 상단 진행률 바 · 스크롤 위치는 문서마다
+기억된다 · 본문 폭·글자 크기 프리셋(툴바 `T`)
+
+**검색** (`Ctrl+F`) · 정규식(`Alt+R`)·대소문자(`Alt+C`)·단어 단위(`Alt+W`), `F3`/`Shift+F3`
+순회, 결과 목록, 오른쪽 가장자리의 **미니맵**에 매치 분포 표시 · CSS Custom Highlight API를 쓰고
+지원하지 않는 브라우저에서는 `<mark>`로 폴백
+
+**편집** · 툴바의 연필로 **분할 편집 모드** — 왼쪽에서 고치면 오른쪽 미리보기가 따라오고 800ms
+뒤 자동 저장된다(저장 상태는 툴바에 표시) · 제목은 툴바에서 바로 고친다 · `.md`로 내보내기
+
+**이동** · `j`/`k`(또는 `n`/`p`)로 다음/이전 헤딩, `g`/`G`로 맨 위/아래, `Ctrl+K` 커맨드 팰릿에서
+헤딩 이름으로 점프
+
+## 네트워크 정책
+
+| 언제 | 무엇을 | 어디서 |
+|---|---|---|
+| 엑셀 파일 열기 · XLSX 내보내기 | SheetJS 0.20.3 (~1MB) | `cdn.sheetjs.com` |
+| jq 쿼리 첫 실행 | jq-web 0.6.2 (`jq.js` + `jq.wasm`) | `cdn.jsdelivr.net` |
+| 마크다운 코드블록 첫 표시 | highlight.js 11.11.1 공통 빌드 (+언어 팩) | `cdnjs.cloudflare.com` |
+| ```` ```mermaid ```` 블록 | Mermaid 11 | `cdn.jsdelivr.net` |
+| `$…$` 수식 | KaTeX 0.16 | `cdn.jsdelivr.net` |
+
+그 외 외부 요청은 **0건**이다 — 폰트도 로컬에 설치된 것만 쓴다(UI는 Pretendard, 데이터·코드는
+Geist Mono 우선의 모노스페이스 스택, 웹폰트 로드 없음). 아이콘은 인라인 SVG. 부팅만으로는 어떤
+CDN도 받지 않으며, `tests/e2e.mjs`가 **허용 목록 밖 외부 요청 0건 · 부팅 시 CDN 0건 · CSV 경로에서
+SheetJS는 XLSX 내보내기 그 한 번**을 감시한다.
+
+이건 명시적인 트레이드오프다: CDN 경로는 그 순간 CDN이 서빙하는 코드를 그대로 실행하므로 빌드
+시점에 고정해 검증한 코드보다 신뢰 경계가 넓다. 인터넷이 없으면 엑셀·jq 실행·코드 강조·Mermaid·
+KaTeX만 안내와 함께 실패하고, CSV/TSV 전 기능과 마크다운 기본 렌더·편집은 완전히 오프라인으로
+동작한다.
+
+## 저장소 (브라우저 안)
+
+IndexedDB `xsv-playground` 하나를 모드별 스토어로 나눠 쓴다: `csv.docMeta`/`csv.docBody`(CSV
+문서 — 목록은 본문을 역직렬화하지 않고 메타만 읽는다), `jq.inputHistory`(300, LRU) /
+`jq.queryHistory`(100) / `jq.savedQueries`, `md.files`(20, LRU — 현재 열린 문서는 밀려나지 않는다).
+설정(테마 선호, 정규식 토글, 패널 비율, 타이포그래피)은 localStorage `xsv.*` 키다.
+
+Chrome은 `file://` 페이지를 전부 같은 origin으로 취급하므로, 여기 저장한 것은 사용자가 로컬에서
+여는 다른 HTML 파일에도 그대로 보인다 — 단일 HTML 배포 형태에서 감수한 트레이드오프.
+
+## 측정된 성능 (CSV 모드)
 
 10만 행 × 25열 / 28MB CSV, Chrome:
 
@@ -130,70 +232,71 @@ Ctrl+C는 `text/plain`(TSV)과 `text/html`(표)을 함께 기록해 Excel·Sheet
 | 스크롤 (일반 휠) | 16.7 ms/frame = 60 fps |
 | 스크롤 (극단적 플링, 매 프레임 화면 전량 교체) | 30 ms/frame |
 | DOM 노드 | 43행 × 15열 ≈ 645 셀 (논리 250만 셀) |
-| `dist/index.html` | 257 KB (gzip 78 KB) — SheetJS는 CDN 지연 로드라 포함되지 않는다 |
+| `dist/index.html` | 600 KB (gzip 186 KB) — CDN 지연 로드 라이브러리는 포함되지 않는다 |
 
 ## 구조
 
 ```
-src/lib/
-  parse/    csv.ts        재개 가능한 RFC4180 파서 (청크 파싱 + 진행률)
-            detect.ts     구분자·헤더·인코딩·칼럼 타입 추론
-            serialize.ts  CSV/TSV/HTML 표 직렬화
-            xlsx.ts       SheetJS 래퍼 — CDN 지연 로드 (통합 문서 읽기 + xlsx 쓰기)
-  data/     dataset.svelte.ts  원본 데이터 + 편집 연산(Op) 적용
-            view.svelte.ts     필터 → 정렬 파이프라인 (인덱스 배열만 생성)
-            selection.svelte.ts  다중 사각 범위 선택 모델
-            history.svelte.ts  Op 역연산 기반 Undo/Redo
-            filter.ts     스마트 필터 컴파일·매칭·하이라이트
-            find.ts       찾기·바꾸기 순수 로직 (스캔 / 계획 수립)
-            findState.svelte.ts  찾기 결과·커서를 패널과 그리드가 공유
-            transform.ts  나누기·결합 계획 수립 (Op 생성 전 단계)
-            docSnapshot.ts  문서 저장 레코드의 pack/unpack (직렬화 규칙, DB 미참조)
-            docStore.ts   IndexedDB 배관 (문서 저장/불러오기 전용)
-            columnFilter.ts / sort.ts / clipboard.ts / export.ts
-  ui/       Grid.svelte   4-페인 가상 스크롤 그리드 (핵심)
-            ColumnManager.svelte  칼럼 on/off 일괄 정리 패널
-            DocPicker.svelte  저장된 문서 목록 (열기·삭제)
-            FindPanel / ReplaceDialog / SplitDialog / JoinDialog
-            dialog/       Promise 기반 공통 confirm·alert·prompt (이식 가능)
-            + 툴바·상태바·필터·드롭다운·컨텍스트 메뉴 등
+src/
+  App.svelte            셸: 테마 · 탭바 · 모드 페인 스택 · 파일 라우팅 · 전역 키 · Toast · DialogHost
+  app.css               디자인 토큰(다크 기본 + [data-theme='light']) · 공용 클래스(.toolbar .btn .field .pop …)
+  shell/
+    mode.ts             ModeId · ModePayload · ModeHandle(openFile/openText/receive/focusMode/handleKeydown)
+    shell.svelte.ts     활성 모드 · 모드별 요약 상태 · mounted 래치 · openFiles() · sendTo()
+    fileKind.ts         파일 종류 판정 (매직 바이트 → 확장자 → 내용 스니핑)
+    theme.svelte.ts     테마 선호/해석 (모든 모드가 구독)
+    ModeTabs.svelte
+  modes/
+    csv/CsvMode.svelte  CSV 모드 (툴바 · 그리드 · 편집 연산 · 문서 저장 · 도구 다이얼로그)
+    jq/                 jq 모드 — JqMode.svelte, jqState.svelte.ts, panels/ autocomplete/ transform/ core/ utils/ data/ ui/
+    md/                 Markdown 모드 — MdMode.svelte, mdState.svelte.ts, components/ lib/
+  lib/                  모드가 공유하는 것
+    parse/    csv.ts detect.ts serialize.ts xlsx.ts(SheetJS CDN 래퍼)
+    data/     dataset.svelte.ts view.svelte.ts selection.svelte.ts history.svelte.ts filter.ts find.ts …
+              idb.ts(IndexedDB 배관·스키마) docStore.ts(CSV 문서) kvStore.ts(범용 CRUD + LRU)
+    ui/       Grid.svelte(4-페인 가상 스크롤, readonly 옵션) GridWorkbench.svelte(그리드+필터+열관리+찾기+내보내기 묶음)
+              ColumnManager DocPicker FindPanel ReplaceDialog SplitDialog JoinDialog ContextMenu Toast toasts.svelte.ts
+              dialog/(Promise 기반 alert·confirm·prompt)
+    util/     cdn.ts(loadScript/loadStyle) storage.ts(localStorage `xsv.` 래퍼) format.ts debounce.ts prefixSum.ts
 ```
 
-### 알아 둘 설계 결정 6가지
+### 알아 둘 설계 결정
 
 **1. 필터·정렬은 원본을 건드리지 않는다.** `rows: string[][]`가 유일한 진실이고, 필터·정렬은
 `Uint32Array` 인덱스 배열만 만든다. 편집은 항상 뷰 좌표를 source 좌표로 바꿔 원본에 쓴다.
 
 **2. `rows`는 `$state.raw`이고, 셀 읽기는 반드시 `ds.cell(r, c)`를 쓴다.**
 250만 개의 문자열을 Svelte deep proxy로 감싸면 스크롤이 불가능해진다. 그래서 `$state.raw` +
-`version` 카운터로 수동 무효화한다. 다만 셀 편집은 배열을 **제자리에서** 바꾸므로 배열 참조도
-행 인덱스도 변하지 않는다 — 템플릿이 `ds.rows[r][c]`를 직접 읽으면 편집 후에도 화면이 갱신되지
-않는다. `ds.cell()`이 `version`을 함께 읽어 이 구멍을 막는다.
+`version` 카운터로 수동 무효화한다. `ds.cell()`이 `version`을 함께 읽어 제자리 편집 후에도 화면이
+갱신되게 한다.
 
 **3. 가상 스크롤의 `{#each}` 키는 반드시 절대 행 인덱스다.**
-슬롯 번호(0..n)를 키로 쓰면 스크롤할 때마다 모든 슬롯의 내용이 바뀌어 화면 전체가 다시 그려진다
-(3행 스크롤과 32행 스크롤의 비용이 같아진다 — 실측 35ms/frame). 절대 인덱스를 키로 쓰면 Svelte가
-남는 행을 이동만 시키고 새로 들어온 몇 행만 만든다 (16.7ms/frame). 같은 이유로 선택 상태는
-가시 창 비트맵이 아니라 절대 좌표를 받는 `isSel(r, c)` 함수로 판정한다.
+슬롯 번호를 키로 쓰면 스크롤할 때마다 모든 슬롯이 다시 그려진다(실측 35ms/frame → 16.7ms/frame).
 
 **4. `colOrder`(전체 순서)와 `viewCols`(보이는 순서)는 다른 것이다.**
-숨기기가 들어오면서 "뷰 칼럼 인덱스 → source 칼럼 인덱스" 변환이 `ds.colOrder[i]`에서
-`view.srcCol(i)`로 바뀌었다. `colOrder`는 숨김과 무관한 전체 순서를 유지해야 숨김을 풀 때 원래
-자리로 돌아온다. 뷰 좌표로 데이터를 읽는 곳은 반드시 `view.srcCol()`/`view.viewCols`를 쓴다 —
-선택 범위의 `c0/c1`도 뷰 좌표이므로 `fullySelectedRows()`에 넘기는 마지막 칼럼 인덱스는
-`ds.colCount - 1`이 아니라 `view.viewCols.length - 1`이다.
+뷰 좌표로 데이터를 읽는 곳은 반드시 `view.srcCol()`/`view.viewCols`를 쓴다.
 
-**5. 칼럼 폭은 추정하지 않고 canvas로 실측한다.**
-`문자 수 × 상수`로 어림하면 한글(전각)·폰트 폴백 때문에 반드시 어긋나고, 그 결과가 곧 "헤더가
-잘려 보인다"로 나타난다. `canvas.measureText()`로 실제 픽셀을 재고, DOM이 없는 단위 테스트
-환경에서는 표시 폭 근사로 떨어진다. 헤더의 정렬·필터 버튼처럼 폭을 먹는 요소가 늘면
-`HEAD_CHROME` 하나만 조정하면 된다(다중 정렬 우선순위 배지는 절대 배치라 폭을 먹지 않는다).
+**5. 칼럼 폭은 추정하지 않고 canvas로 실측한다.** 한글(전각)·폰트 폴백 때문에 `문자 수 × 상수`는
+반드시 어긋난다.
 
-**6. 미리보기와 적용은 같은 함수를 호출한다.**
-바꾸기·나누기·결합은 모두 "계획(plan)"을 만드는 순수 함수(`planReplace`, `planSplitToCols`,
-`planSplitToRows`, `planJoin`)를 먼저 통과한다. 다이얼로그의 미리보기와 실제 적용이 이 같은
-함수를 쓰기 때문에 "미리보기는 3건인데 4건이 바뀌었다" 류의 불일치가 구조적으로 불가능하다.
-계획을 `Op`로 옮기는 것은 마지막 한 단계뿐이라 Undo도 자동으로 따라온다.
+**6. 미리보기와 적용은 같은 함수를 호출한다.** 바꾸기·나누기·결합은 "계획(plan)"을 만드는 순수
+함수를 먼저 통과하므로 "미리보기는 3건인데 4건이 바뀌었다" 류의 불일치가 구조적으로 불가능하다.
+CSV → jq 전송도 내보내기와 같은 `buildMatrix`를 쓴다.
+
+**7. 모드 페인은 `display:none`이 아니라 `visibility:hidden` + `inert`로 숨긴다.** `display:none`은
+`overflow:auto` 요소의 `scrollTop`을 0으로 되돌리고 그리드 뷰포트를 한 프레임 0으로 만든다 —
+"오가도 그대로"라는 요구를 정면으로 깨뜨린다. `inert`는 숨은 페인으로 포커스가 들어가는 것을 막는다.
+
+**8. 단축키는 셸이 캡처 단계에서 한 번만 잡아 활성 모드에 넘긴다.** 모드가 각자 `window`에
+리스너를 달면 비활성 모드가 `/`나 `Ctrl+F`를 가로챈다. 다이얼로그가 떠 있으면 어느 모드에도
+넘기지 않는다.
+
+**9. 표는 텍스트로 직렬화하지 않고 2차원 배열로 넘긴다.** jq → CSV 전송이 CSV 텍스트를 만들어
+다시 파싱하면 인용·개행 왕복 비용과 손실 위험만 생긴다. `ModePayload`의 `table`은 `header` +
+`rows` 그대로다.
+
+**10. 콘솔에는 아무것도 쓰지 않는다.** `tests/e2e.mjs`가 콘솔 에러 1건에도 실패한다. IndexedDB
+배관·CDN 로더·jq 워커(Emscripten 로그를 워커 안에서만 무력화) 모두 이 규약을 따른다.
 
 ## 검증
 
@@ -201,52 +304,34 @@ src/lib/
 npm run verify     # 타입체크 + 단위 테스트 + 빌드 + E2E + 극단 입력
 ```
 
-- **`npm run test`** — 301개 단위 테스트 (파서, 쿼리 문법, 정렬 비교자, Op 역연산 라운드트립,
-  직렬화 라운드트립, 숨기기 인덱스 매핑, 찾기·바꾸기 스캔/계획, 나누기·결합 계획, 스토어 통합,
-  문서 저장 레코드의 pack/unpack 라운드트립)
-- **`npm run e2e`** — 297개 검사. 실제 Chrome에서 `dist/index.html`을 `file://`로 열어
-  전 기능을 조작한다. 열 관리 패널, 우클릭 메뉴 키보드 조작, 거터·헤더 휠 스크롤, 공통
-  다이얼로그의 확인/취소/Escape, 문서 저장·열기(IndexedDB, 10만 행 문서 포함)까지 포함한다.
-  **네트워크 요청은 XLSX 내보내기 시의 SheetJS CDN 요청 정확히 1건만 허용**하고, 그 외 외부
-  요청·콘솔 에러가 하나라도 있으면 실패한다(이 검사는 실제 인터넷 연결이 필요하다).
-  `npm run e2e:shots`로 각 단계 스크린샷을 `.e2e-shots/`에 남긴다.
-- **`npm run edge`** — 24개 검사. cp949 인코딩, 500칼럼, 4000자 셀, CRLF, 인용 안 개행,
-  헤더 없는 파일, 세미콜론 구분자, 내보내기 라운드트립.
+- **`npm run test`** — 460개 단위 테스트. CSV 파서·쿼리 문법·정렬·Op 역연산·직렬화·숨기기 매핑·
+  찾기/바꾸기·나누기/결합·문서 저장 레코드, **파일 종류 판정**, jq 토크나이저·JSON 전처리·
+  stringified 필드·CSV 행렬 변환·자동완성 단어 분석, Markdown 이력 DB(LRU·보호·갱신).
+- **`npm run e2e`** — 330여 개 검사. 실제 Chrome에서 `dist/index.html`을 `file://`로 열어 CSV 전
+  기능에 더해 **모드 전환**(상태·스크롤 위치 보존, 비활성 모드 단축키 격리), **파일 종류 자동
+  전환**(`.md` `.json` JSON 내용 `.txt` 탭 구분 `.txt`), **도구 간 연결**(CSV→jq, jq→CSV, MD
+  코드블록→CSV, 덮어쓰기 confirm)을 조작한다. 허용 목록 밖 외부 요청·콘솔 에러가 하나라도 있으면
+  실패한다(jq-web과 SheetJS를 받으므로 실제 인터넷 연결이 필요하다). `npm run e2e:shots`로 각
+  단계 스크린샷을 `.e2e-shots/`에 남긴다.
+- **`npm run edge`** — 36개 검사. cp949 인코딩, 500칼럼, 4000자 셀, CRLF, 인용 안 개행, 헤더 없는
+  파일, 세미콜론 구분자, 내보내기 라운드트립, 확장자가 틀린 엑셀.
 
-대용량 E2E에는 픽스처가 필요하다:
-
-```
-npm run fixture    # → fixtures/big.csv (10만 행 × 25열, 28MB)
-```
-
-E2E는 시스템에 설치된 Chrome을 `puppeteer-core`로 구동한다. 경로가 다르면
-`tests/e2e.mjs`의 `CHROME` 상수를 고친다.
-
-## 범위 외
-
-xlsx **읽기**(입력은 csv/tsv 텍스트만, xlsx는 내보내기 전용) · 수식/계산 · 다중 시트
-
-문서 저장은 **데이터 + 열 상태**(열 순서·폭·타입)만 담는다. 정렬·필터·숨김 같은 뷰 상태와
-되돌리기 기록은 저장하지 않는다 — 문서를 열면 파일을 여는 것과 동일하게 그 상태들이 초기화된다.
-또한 Chrome은 `file://` 페이지를 전부 같은 origin으로 취급하므로, 여기 저장한 문서는 사용자가
-로컬에서 여는 다른 HTML 파일에도 그대로 보인다.
+대용량 E2E에는 픽스처가 필요하다: `npm run fixture` (→ `fixtures/big.csv`, 10만 행 × 25열, 28MB).
+E2E는 시스템에 설치된 Chrome을 `puppeteer-core`로 구동한다. 경로가 다르면 `tests/e2e.mjs`의
+`CHROME` 상수를 고친다. 대용량 그룹의 스크롤 프레임 시간 검사는 기기 성능에 따라 흔들릴 수 있다.
 
 ## 의존성
 
-Svelte 5 + TypeScript + Vite, `vite-plugin-singlefile`로 단일 파일 번들. **런타임 의존성은
-0개다** — SheetJS(`xlsx`)는 `import type`으로만 참조해 타입 체크에만 쓰고, 빌드 산출물에는
-실행 코드가 전혀 들어가지 않는다(`package.json`의 devDependencies에 있는 이유). 실제 라이브러리는
-`src/lib/parse/xlsx.ts`가 **엑셀 파일을 열거나** XLSX로 내보내는 시점에 `<script>` 태그를
-주입해 SheetJS 공식 CDN(`cdn.sheetjs.com`)에서 UMD 빌드를 받아오고, 세션 안에서는 한 번만
-받는다. 파일이 스프레드시트인지 판정하는 `looksSpreadsheet`만은 SheetJS 없이 `detect.ts`에서
-하므로, 엑셀 파일을 건드리지 않는 세션은 여전히 외부 요청이 0건이다.
+Svelte 5 + TypeScript + Vite, `vite-plugin-singlefile`로 단일 파일 번들. 번들에 들어가는 런타임
+의존성은 **`marked`와 `dompurify` 두 개**(마크다운 기본 렌더가 오프라인에서 동작해야 하므로)다.
+SheetJS(`xlsx`)는 `import type`으로만 참조해 타입 체크에만 쓰고, 실행 코드는 CDN에서 받는다.
+jq-web·highlight.js·Mermaid·KaTeX는 npm 의존성조차 아니다 — URL과 버전이 각 로더 파일에 고정되어
+있다(`src/lib/parse/xlsx.ts`, `src/modes/jq/core/jq-functions.ts`, `src/modes/md/lib/highlight.ts`,
+`src/modes/md/lib/render-extras.ts`).
 
-이건 명시적인 트레이드오프다: XLSX 경로는 그 순간의 CDN이 서빙하는 코드를 그대로 실행하므로
-빌드 시점에 고정해 검증한 코드보다 신뢰 경계가 넓다. 인터넷이 없으면(사내 폐쇄망 등) 엑셀 파일
-열기와 XLSX 내보내기만 실패하고 안내 토스트가 뜬다 — CSV/TSV 관련 기능은 이 트레이드오프와
-무관하게 완전히 오프라인으로 동작한다. `tests/e2e.mjs`는 전체 실행 동안 SheetJS CDN 요청이
-**XLSX 내보내기 그 한 번, 정확히 그 주소로만** 일어나는지 감시한다.
+## 범위 외
 
-폰트는 로컬에 설치되어 있다고 가정하는 스택만 쓴다 — UI 텍스트는 Pretendard, 데이터 그리드는
-Geist Mono 우선의 모노스페이스. 웹폰트 로드는 하지 않는다. 아이콘은 인라인 SVG다. XLSX를 제외한
-외부 리소스를 참조하는 순간 "파일 하나로 동작한다"는 전제가 깨지므로 E2E가 이를 감시한다.
+수식/계산 · CSV 다중 시트 동시 편집 · 마크다운 다중 문서 탭 · jq 쿼리 문법 하이라이팅.
+
+CSV 문서 저장은 **데이터 + 열 상태**만 담는다. Markdown 편집은 자동 저장이라 "저장되지 않은
+변경" 상태가 800ms 이상 유지되지 않는다(탭에 저장 배지가 없는 것이 정상).

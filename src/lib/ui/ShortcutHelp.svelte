@@ -126,6 +126,16 @@
         ['문서 메뉴', '문서 열기 · 삭제'],
       ],
     },
+    {
+      title: '모드 (CSV · jq · Markdown)',
+      rows: [
+        ['Ctrl Shift 1', 'CSV 모드'],
+        ['Ctrl Shift 2', 'jq 모드'],
+        ['Ctrl Shift 3', 'Markdown 모드'],
+        ['파일 드롭', '종류에 맞는 모드로 자동 전환'],
+        ['도구 메뉴', '표를 JSON으로 jq에 보내기 (전체 · 보이는 부분 · 선택)'],
+      ],
+    },
   ]
 </script>
 

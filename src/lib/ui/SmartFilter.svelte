@@ -7,8 +7,10 @@
   interface Props {
     view: View
     totalRows: number
+    /** 정규식 모드를 기억할 localStorage 키. 모드마다 달라야 Alt+R 상태가 전이되지 않는다 */
+    storageKey?: string
   }
-  let { view, totalRows }: Props = $props()
+  let { view, totalRows, storageKey = 'regexMode' }: Props = $props()
 
   /** 디바운스를 걸기 전 즉시 반영되는 입력값 (view.query와 분리) */
   let raw = $state('')
@@ -65,7 +67,7 @@
 
   function toggleRegex(): void {
     view.regexMode = !view.regexMode
-    save('regexMode', view.regexMode)
+    save(storageKey, view.regexMode)
   }
 
   export function focus(): void {

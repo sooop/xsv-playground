@@ -12,6 +12,11 @@
     sel: SelectionStore
     /** 찾기 상태 — 매치 셀 강조에만 쓴다 (패널이 열려 있지 않으면 결과가 비어 있다) */
     find: FindStore
+    /**
+     * 읽기 전용 — 셀 편집·붙여넣기·내용 지우기·헤더 이름 변경·행 순서 변경을 막는다.
+     * 정렬·필터·선택·복사·열 폭·열 순서는 뷰 조작이므로 그대로 허용한다(jq 출력 뷰가 쓴다).
+     */
+    readonly?: boolean
     /** 셀 편집 확정 */
     onCommitCell: (srcRow: number, srcCol: number, value: string) => void
     /** 헤더명 변경 확정 */
@@ -36,6 +41,7 @@
     view,
     sel,
     find,
+    readonly = false,
     onCommitCell,
     onRenameHeader,
     onMoveCol,
@@ -141,6 +147,18 @@
     if (gutTrack) gutTrack.style.transform = `translate3d(0,${-el.scrollTop}px,0)`
     scrollLeft = el.scrollLeft
     scrollTop = el.scrollTop
+  }
+
+  /**
+   * 뷰포트 크기를 다시 잰다. ResizeObserver가 평소에는 알아서 하지만, 숨겨졌다가 다시 보이는
+   * 페인(모드 전환)처럼 관측이 어긋날 수 있는 순간에 호출자가 직접 부를 수 있게 노출한다.
+   */
+  export function remeasure(): void {
+    const el = bodyEl
+    if (!el) return
+    viewportH = el.clientHeight
+    viewportW = el.clientWidth
+    syncScroll()
   }
 
   $effect(() => {
@@ -316,7 +334,7 @@
     const hit = cellAtEvent(e)
     if (!hit) return
     sel.selectCell(hit.r, hit.c)
-    startEdit()
+    if (!readonly) startEdit()
   }
 
   // --- 셀 편집 ---
@@ -332,6 +350,7 @@
   }
 
   export function startEdit(initial?: string): void {
+    if (readonly) return
     if (rowCount === 0 || colCount === 0) return
     const { r, c } = sel.active
     if (r >= rowCount || c >= colCount) return
@@ -444,7 +463,7 @@
         break
       case 'Delete':
       case 'Backspace':
-        onDeleteContents()
+        if (!readonly) onDeleteContents()
         break
       case 'a':
       case 'A':
@@ -472,6 +491,7 @@
 
   /** 인쇄 가능한 문자를 누르면 그 문자로 편집을 시작한다 (스프레드시트 관행) */
   function typeToEdit(e: KeyboardEvent): void {
+    if (readonly) return // preventDefault보다 먼저 — 키를 삼키면 안 된다
     if (e.ctrlKey || e.metaKey || e.altKey) return
     if (e.key.length !== 1) return
     e.preventDefault()
@@ -479,7 +499,7 @@
   }
 
   function onPaste(e: ClipboardEvent): void {
-    if (editing) return
+    if (editing || readonly) return
     const text = e.clipboardData?.getData('text/plain')
     if (!text) return
     e.preventDefault()
@@ -576,7 +596,7 @@
       ds.autoWidth(view.srcCol(viewCol))
       return
     }
-    startRenameHeader(viewCol)
+    if (!readonly) startRenameHeader(viewCol)
   }
 
   /**
@@ -664,6 +684,10 @@
 
     if (d.kind === 'maybe') {
       if (Math.abs(e.clientY - d.startY) < DRAG_THRESHOLD) return
+      if (readonly) {
+        gutDrag = null
+        return
+      }
       if (view.isSorted) {
         onNotice('정렬을 해제해야 행 순서를 바꿀 수 있습니다')
         gutDrag = null
@@ -745,6 +769,7 @@
 <div
   class="grid"
   class:no-data={rowCount === 0}
+  class:readonly
   bind:this={rootEl}
   tabindex="0"
   role="grid"
@@ -921,7 +946,7 @@
         </div>
       {/each}
 
-      {#if editing}
+      {#if editing && !readonly}
         <input
           class="editor"
           bind:this={editEl}

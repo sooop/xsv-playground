@@ -5,9 +5,10 @@
  *   npm run build && node tests/e2e.mjs [--headful] [--shots]
  *
  * 소스가 아니라 배포되는 단일 HTML 그 자체를, 사용자가 더블클릭했을 때와 같은 조건으로 띄운다.
- * 외부 요청이 하나라도 발생하면 잡아내고, 가상 스크롤·필터·정렬·편집·되돌리기를 실제 DOM에서 확인한다.
+ * 허용된 CDN(기능을 실제로 쓸 때만 받는 라이브러리) 밖의 외부 요청이 하나라도 발생하면 잡아내고,
+ * 가상 스크롤·필터·정렬·편집·되돌리기·모드 전환을 실제 DOM에서 확인한다.
  */
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import puppeteer from 'puppeteer-core'
@@ -46,18 +47,28 @@ const browser = await puppeteer.launch({
 const page = await browser.newPage()
 
 // --- 외부 요청 및 에러 감시 ---
-// SheetJS는 XLSX 내보내기를 실제로 쓸 때만 CDN에서 받아온다 — "예상된 유일한 예외"라
-// 그 외 모든 외부 요청과 분리해서 센다. 전자가 1건도 아니거나(0건, 또는 xlsx 없이 발생),
-// 후자가 1건이라도 있으면 "완전히 오프라인" 약속이 깨진 것이다.
-const SHEETJS_CDN = 'https://cdn.sheetjs.com/'
+// 무거운 라이브러리(SheetJS·jq-web·highlight.js·Mermaid·KaTeX)는 해당 기능을 실제로 쓸 때만
+// CDN에서 받아온다. 그 "허용된 CDN"으로 가는 요청은 따로 세고, 그 밖의 외부 요청은 1건이라도
+// 있으면 실패다. 부팅만으로는 어떤 CDN도 받지 않아야 하고(파일 하나로 즉시 뜬다는 약속),
+// CSV 경로 전 과정에서 SheetJS는 XLSX 내보내기 그 한 번만 받아와야 한다.
+const ALLOWED_CDNS = {
+  sheetjs: 'https://cdn.sheetjs.com/',
+  jq: 'https://cdn.jsdelivr.net/npm/jq-web',
+  mermaid: 'https://cdn.jsdelivr.net/npm/mermaid',
+  katex: 'https://cdn.jsdelivr.net/npm/katex',
+  hljs: 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/',
+}
+const cdnHits = new Map(Object.keys(ALLOWED_CDNS).map((k) => [k, []]))
 const external = []
-const sheetjsRequests = []
+const sheetjsRequests = cdnHits.get('sheetjs')
+const cdnTotal = () => [...cdnHits.values()].reduce((a, v) => a + v.length, 0)
 const consoleErrors = []
 const pageErrors = []
 page.on('request', (r) => {
   const u = r.url()
   if (u.startsWith('file://') || u.startsWith('data:') || u.startsWith('blob:')) return
-  if (u.startsWith(SHEETJS_CDN)) sheetjsRequests.push(u)
+  const key = Object.keys(ALLOWED_CDNS).find((k) => u.startsWith(ALLOWED_CDNS[k]))
+  if (key) cdnHits.get(key).push(u)
   else external.push(u)
 })
 page.on('console', (m) => {
@@ -215,8 +226,8 @@ await page.waitForSelector('#app *', { timeout: 10000 })
 // ===================================================================
 group('부팅 (file://)')
 check('앱 마운트', (await page.$$('#app *')).length > 0)
-check('외부 네트워크 요청 0건', external.length === 0, external.slice(0, 3).join(', '))
-check('부팅만으로는 SheetJS도 받지 않는다', sheetjsRequests.length === 0, sheetjsRequests.join(', '))
+check('허용 목록 밖 외부 네트워크 요청 0건', external.length === 0, external.slice(0, 3).join(', '))
+check('부팅만으로는 어떤 CDN도 받지 않는다', cdnTotal() === 0, [...cdnHits.values()].flat().join(', '))
 check('페이지 에러 없음', pageErrors.length === 0, pageErrors.slice(0, 2).join(' | '))
 check('콘솔 에러 없음', consoleErrors.length === 0, consoleErrors.slice(0, 2).join(' | '))
 const bootText = await page.evaluate(() => document.body.innerText)
@@ -877,7 +888,7 @@ check(
 )
 check(
   '가져온 주소가 공식 SheetJS CDN',
-  sheetjsRequests[0]?.startsWith(SHEETJS_CDN) ?? false,
+  sheetjsRequests[0]?.startsWith(ALLOWED_CDNS.sheetjs) ?? false,
   sheetjsRequests[0],
 )
 check(
@@ -1538,6 +1549,64 @@ await sleep(420)
 check('헤더행 토글 복귀', (await headerNames())[0] === hdrBefore, (await headerNames())[0])
 
 // ===================================================================
+group('모드 전환 (CSV / jq / Markdown)')
+// 세 모드는 탭으로 오가되 각 모드의 상태(스크롤 위치까지)가 그대로 남아야 한다. 비활성 모드는
+// visibility로만 숨기므로 DOM은 남아 있고, 단축키는 활성 모드에만 전달된다.
+
+const activeTab = () => page.$eval('[role=tab][aria-selected=true]', (e) => e.textContent.trim())
+/** 활성 모드 페인 안의 헤더만 — jq 출력 그리드도 같은 클래스를 쓰므로 문서 전체를 세면 섞인다 */
+const visibleHeaderNames = () =>
+  page.$$eval('.mode-pane:not(.inactive) .th-name', (e) => e.map((x) => x.textContent.trim()))
+const csvPaneHidden = () =>
+  page.evaluate(() => {
+    const grid = document.querySelector('[role=grid]')
+    return grid ? getComputedStyle(grid).visibility === 'hidden' : null
+  })
+const bodyScrollTop = () => page.$eval('.body', (e) => e.scrollTop)
+
+check('처음엔 CSV 탭이 활성', (await activeTab()).startsWith('CSV'), await activeTab())
+await page.$eval('.body', (e) => (e.scrollTop = 84))
+await sleep(120)
+const scrollBefore = await bodyScrollTop()
+const headersBefore = (await headerNames()).join(',')
+
+await page.click('[role=tab]:nth-child(2)')
+await sleep(150)
+check('jq 탭 클릭 → jq 활성', (await activeTab()).startsWith('jq'), await activeTab())
+check('CSV 그리드는 DOM에 남고 숨겨진다', (await csvPaneHidden()) === true)
+check(
+  'jq 페인이 보인다',
+  (await page.$$eval('.mode-pane', (els) => els.filter((e) => getComputedStyle(e).visibility === 'visible').length)) === 1,
+)
+
+// jq 모드에서 `/`는 CSV 스마트 필터로 새지 않아야 한다
+await page.keyboard.press('/')
+await sleep(120)
+const focusedInput = await page.evaluate(() => document.activeElement instanceof HTMLInputElement)
+check('비활성 CSV 모드는 단축키를 받지 않는다 (`/`가 필터로 새지 않음)', !focusedInput)
+
+await page.keyboard.down('Control')
+await page.keyboard.down('Shift')
+await page.keyboard.press('Digit3')
+await page.keyboard.up('Shift')
+await page.keyboard.up('Control')
+await sleep(150)
+check('Ctrl+Shift+3 → Markdown 활성', (await activeTab()).startsWith('Markdown'), await activeTab())
+
+await page.keyboard.down('Control')
+await page.keyboard.down('Shift')
+await page.keyboard.press('Digit1')
+await page.keyboard.up('Shift')
+await page.keyboard.up('Control')
+await sleep(200)
+check('Ctrl+Shift+1 → CSV 복귀', (await activeTab()).startsWith('CSV'), await activeTab())
+check('CSV 그리드가 다시 보인다', (await csvPaneHidden()) === false)
+check('스크롤 위치 보존', (await bodyScrollTop()) === scrollBefore, `${scrollBefore} → ${await bodyScrollTop()}`)
+check('헤더 상태 보존', (await headerNames()).join(',') === headersBefore)
+check('복귀 후 그리드 행이 그려져 있다', (await visRows()) > 5, (await visRows()) + '행')
+await page.click('[role=grid]')
+
+// ===================================================================
 group('문서 저장 · 열기 (IndexedDB)')
 // puppeteer는 실행마다 새 프로필을 쓰므로 여기서부터 IndexedDB는 항상 빈 상태다.
 
@@ -1919,8 +1988,112 @@ await wheelOver('.body', { deltaY: 300 })
 check('본문 휠은 그대로 동작', (await scrollState()).top > beforeBody, `${beforeBody} → ${(await scrollState()).top}`)
 
 // ===================================================================
+group('파일 종류 자동 전환')
+// 셸이 파일 앞부분(매직 바이트 → 확장자 → 내용)으로 종류를 판정해 해당 모드로 열고 전환한다.
+// 여기서 여는 파일은 작고, 이후 그룹은 CSV 상태에 의존하지 않으므로 마지막에 둔다.
+const E2E_TMP = resolve('.e2e-tmp')
+if (!existsSync(E2E_TMP)) mkdirSync(E2E_TMP, { recursive: true })
+const routeFiles = {
+  'notes.md': '# 제목\n\n본문 문단입니다.\n',
+  'data.json': '[{"a":1},{"a":2}]',
+  'jsonish.txt': '{"hello": "world", "n": 3}',
+  'table.txt': '이름\t수량\n사과\t3\n배\t5\n',
+}
+for (const [name, body] of Object.entries(routeFiles)) writeFileSync(resolve(E2E_TMP, name), body, 'utf8')
+const shellInput = () => page.$('#shell-file-input')
+const openViaShell = async (name) => {
+  const input = await shellInput()
+  await input.uploadFile(resolve(E2E_TMP, name))
+  await sleep(500)
+}
+
+await openViaShell('notes.md')
+check('.md → Markdown 모드로 전환', (await activeTab()).startsWith('Markdown'), await activeTab())
+await openViaShell('data.json')
+check('.json → jq 모드로 전환', (await activeTab()).startsWith('jq'), await activeTab())
+await openViaShell('jsonish.txt')
+check('JSON 내용의 .txt → jq 모드', (await activeTab()).startsWith('jq'), await activeTab())
+await openViaShell('table.txt')
+check('탭 구분 표 .txt → CSV 모드', (await activeTab()).startsWith('CSV'), await activeTab())
+await page.waitForFunction(() => document.querySelector('.bar')?.innerText.includes('2'), { timeout: 5000 })
+check('CSV 모드에 표가 열렸다 (이름,수량)', (await visibleHeaderNames()).join(',') === '이름,수량', (await visibleHeaderNames()).join(','))
+
+// ===================================================================
+group('도구 간 연결 (CSV ↔ jq ↔ Markdown)')
+// 셸의 sendTo: 대상 모드에 문서가 있으면 공통 confirm 다이얼로그로 덮어쓰기를 묻고, 전달 후 그 모드로 전환한다.
+const clickDialogOk = async () => {
+  await page.waitForSelector('.dlg-btn.primary', { timeout: 3000 })
+  await page.click('.dlg-btn.primary')
+  await sleep(300)
+}
+const clickMenuItem = async (label) => {
+  await page.waitForSelector('[role=menu]', { timeout: 3000 })
+  await page.evaluate((t) => {
+    ;[...document.querySelectorAll('[role=menuitem]')].find((b) => b.textContent.includes(t)).click()
+  }, label)
+}
+
+// (a) CSV(이름,수량 표) → jq: 도구 메뉴 → "jq로 보내기 — 전체". jq에는 앞 그룹에서 연 JSON이 있어 confirm이 뜬다.
+await clickText('도구')
+await clickMenuItem('jq로 보내기 — 전체')
+await clickDialogOk()
+await sleep(400)
+check('CSV → jq: jq 모드로 전환', (await activeTab()).startsWith('jq'), await activeTab())
+const jqInput = await page.$eval('[aria-label="JSON 입력"] textarea', (el) => el.value)
+check('CSV → jq: 입력에 객체 배열 JSON', jqInput.includes('"이름"') && jqInput.includes('"사과"'), jqInput.slice(0, 60))
+
+// (b) jq → CSV: 쿼리 `.` 실행 → CSV 형식 → "CSV 모드로". jq-web은 여기서 처음 CDN에서 받아온다.
+await page.evaluate(() => {
+  const q = [...document.querySelectorAll('textarea')].find((t) => (t.placeholder ?? '').includes('jq'))
+  q.focus()
+  q.value = '.'
+  q.dispatchEvent(new Event('input', { bubbles: true }))
+})
+await page.waitForFunction(() => document.querySelector('.stats')?.textContent.includes('ms'), {
+  timeout: 30000,
+  polling: 200,
+})
+await page.select('select[aria-label="출력 형식"]', 'csv')
+await page.waitForSelector('[role=grid]', { timeout: 15000 })
+await sleep(400)
+check('jq → CSV: 출력 그리드가 뜬다 (readonly)', (await page.$('.grid.readonly')) !== null)
+check('jq-web은 허용 CDN에서 받아왔다', cdnHits.get('jq').length >= 1, cdnHits.get('jq').join(', '))
+await clickText('CSV 모드로')
+await clickDialogOk()
+await sleep(500)
+check('jq → CSV: CSV 모드로 전환', (await activeTab()).startsWith('CSV'), await activeTab())
+check('jq → CSV: 표 헤더가 jq 결과의 키', (await visibleHeaderNames()).join(',').includes('이름'), (await visibleHeaderNames()).join(','))
+
+// (c) Markdown 코드블록 → CSV: ```csv 블록의 "CSV로 열기" 버튼
+await page.click('[role=tab]:nth-child(3)')
+await sleep(300)
+await page.evaluate((text) => {
+  const dt = new DataTransfer()
+  dt.setData('text/plain', text)
+  document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+}, '# 연결 테스트\n\n```csv\nid,name\n1,kim\n2,lee\n```\n')
+await page.waitForSelector('.md-code-open-btn', { timeout: 5000 })
+await page.evaluate(() => document.querySelector('.md-code-open-btn').click())
+await clickDialogOk()
+await sleep(500)
+check('MD 코드블록 → CSV: CSV 모드로 전환', (await activeTab()).startsWith('CSV'), await activeTab())
+check('MD 코드블록 → CSV: 헤더 id,name', (await visibleHeaderNames()).join(',') === 'id,name', (await visibleHeaderNames()).join(','))
+
+// (d) 단축키 격리: Markdown 활성 상태에서 `/`가 CSV 필터로 새지 않는다 (앞 그룹의 jq 검사와 짝)
+await page.click('[role=tab]:nth-child(3)')
+await sleep(200)
+await page.keyboard.press('/')
+await sleep(150)
+check(
+  'Markdown 활성 시 `/`가 CSV 필터로 새지 않음',
+  !(await page.evaluate(() => document.activeElement instanceof HTMLInputElement)),
+)
+await page.click('[role=tab]:nth-child(1)')
+await sleep(200)
+
+// ===================================================================
 group('최종')
-check('전 과정 예상 밖 외부 요청 0건', external.length === 0, external.slice(0, 3).join(', '))
+check('전 과정 허용 목록 밖 외부 요청 0건', external.length === 0, external.slice(0, 3).join(', '))
 check(
   '전 과정 통틀어 SheetJS는 XLSX 내보내기 그 한 번만 받아온다',
   sheetjsRequests.length === 1,

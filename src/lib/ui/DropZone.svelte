@@ -4,6 +4,10 @@
   import { ago, num } from '../util/format'
 
   interface Props {
+    /** 이 모드가 화면에 보이는지. false면 창 전역 붙여넣기를 가로채지 않는다(다른 모드의 것이다). */
+    active?: boolean
+    /** 파일 선택 대화상자의 accept. 셸이 여러 종류를 받으면 넓혀 준다. */
+    accept?: string
     onFiles: (files: FileList) => void
     onPasteText: (text: string) => void
     onSample: () => void
@@ -15,8 +19,18 @@
     onOpenDoc: (id: string) => void
     onBrowseDocs: () => void
   }
-  let { onFiles, onPasteText, onSample, progress, progressLabel, savedDocs, onOpenDoc, onBrowseDocs }: Props =
-    $props()
+  let {
+    active = true,
+    accept = FILE_ACCEPT,
+    onFiles,
+    onPasteText,
+    onSample,
+    progress,
+    progressLabel,
+    savedDocs,
+    onOpenDoc,
+    onBrowseDocs,
+  }: Props = $props()
 
   let over = $state(false)
   let pasteMode = $state(false)
@@ -32,6 +46,7 @@
   }
 
   function onPaste(e: ClipboardEvent): void {
+    if (!active) return
     const text = e.clipboardData?.getData('text/plain')
     if (text && text.trim() !== '') {
       e.preventDefault()
@@ -133,7 +148,7 @@
   <input
     bind:this={fileEl}
     type="file"
-    accept={FILE_ACCEPT}
+    accept={accept}
     hidden
     onchange={(e) => {
       const f = e.currentTarget.files

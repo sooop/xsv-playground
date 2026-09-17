@@ -9,5 +9,6 @@ fixtures/*.txt
 # E2E 스크린샷
 .e2e-shots/
 .edge-tmp/
+.e2e-tmp/
 
 *.stackdump

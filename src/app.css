@@ -17,6 +17,7 @@
   --header-h: 30px;
   --gutter-w: 62px;
   --toolbar-h: 46px;
+  --tabbar-h: 34px;
   --status-h: 30px;
 
   --fs-cell: 12.5px;
@@ -213,6 +214,33 @@ select {
 
 /* --- 공용 컴포넌트 클래스 --- */
 
+/* 모드 툴바 — 세 모드가 같은 높이·배경의 툴바 행을 쓴다 */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  height: var(--toolbar-h);
+  padding: 0 9px;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border);
+}
+
+/* 창 전체 드롭 안내 — 페인을 덮는 점선 상자 */
+.drop-hint {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--accent-soft);
+  border: 2px dashed var(--accent);
+  color: var(--accent);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+  z-index: 30;
+}
+
 /* 툴바/메뉴의 기본 버튼 */
 .btn {
   display: inline-flex;
@@ -254,6 +282,11 @@ select {
   width: 28px;
   padding: 0;
   justify-content: center;
+}
+/* 토글 상태가 켜진 버튼 */
+.btn.on {
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 /* 대문자 레터스페이스 라벨 — 계측기 눈금 같은 성격 */

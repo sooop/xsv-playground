@@ -18,20 +18,29 @@ export class FindStore {
   /** 실제 검색에 쓰이는 값 */
   query = $state('')
 
-  regex = $state<boolean>(load('findRegex', false))
-  caseSensitive = $state<boolean>(load('findCase', false))
-  wholeCell = $state<boolean>(load('findWhole', false))
+  regex = $state<boolean>(false)
+  caseSensitive = $state<boolean>(false)
+  wholeCell = $state<boolean>(false)
   /** 선택 영역 안에서만 찾기 */
   inSelection = $state(false)
 
   /** 현재 매치 인덱스 (-1이면 없음) */
   cursor = $state(-1)
 
+  /** localStorage 키 접두 — 모드마다 달라야 토글 상태가 서로 전이되지 않는다 */
+  readonly #keyPrefix: string
+
   constructor(
     private readonly ds: Dataset,
     private readonly view: View,
     private readonly sel: SelectionStore,
-  ) {}
+    keyPrefix = '',
+  ) {
+    this.#keyPrefix = keyPrefix
+    this.regex = load(keyPrefix + 'findRegex', false)
+    this.caseSensitive = load(keyPrefix + 'findCase', false)
+    this.wholeCell = load(keyPrefix + 'findWhole', false)
+  }
 
   spec = $derived<FindSpec>({
     query: this.query,
@@ -123,15 +132,15 @@ export class FindStore {
 
   toggleRegex(): void {
     this.regex = !this.regex
-    save('findRegex', this.regex)
+    save(this.#keyPrefix + 'findRegex', this.regex)
   }
   toggleCase(): void {
     this.caseSensitive = !this.caseSensitive
-    save('findCase', this.caseSensitive)
+    save(this.#keyPrefix + 'findCase', this.caseSensitive)
   }
   toggleWhole(): void {
     this.wholeCell = !this.wholeCell
-    save('findWhole', this.wholeCell)
+    save(this.#keyPrefix + 'findWhole', this.wholeCell)
   }
 
   reset(): void {
