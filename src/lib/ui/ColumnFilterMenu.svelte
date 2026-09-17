@@ -3,6 +3,7 @@
   import type { Dataset } from '../data/dataset.svelte'
   import type { View } from '../data/view.svelte'
   import { num } from '../util/format'
+  import { dismissable } from './dismiss'
 
   interface Props {
     ds: Dataset
@@ -62,7 +63,6 @@
   let textNegate = $state(false)
 
   let searchEl = $state<HTMLInputElement | null>(null)
-  let panelEl = $state<HTMLDivElement | null>(null)
 
   // 기존 필터 상태로 초기화 (한 번만)
   let initialized = false
@@ -129,10 +129,7 @@
 
   function onKeyDown(e: KeyboardEvent): void {
     e.stopPropagation()
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      onClose()
-    } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault()
       apply()
     }
@@ -150,28 +147,16 @@
     return { left, top }
   })
 
-  /** 바깥 클릭으로 닫기 */
-  $effect(() => {
-    const onDown = (e: PointerEvent) => {
-      if (panelEl && !panelEl.contains(e.target as Node)) onClose()
-    }
-    // 이 이벤트를 만든 클릭이 곧바로 닫지 않도록 다음 틱에 등록
-    const id = setTimeout(() => window.addEventListener('pointerdown', onDown, true), 0)
-    return () => {
-      clearTimeout(id)
-      window.removeEventListener('pointerdown', onDown, true)
-    }
-  })
 </script>
 
 <div
   class="panel pop"
-  bind:this={panelEl}
   style="left:{pos.left}px;top:{pos.top}px"
   onkeydown={onKeyDown}
   role="dialog"
   aria-label="{ds.header[col]} 필터"
   tabindex="-1"
+  {@attach dismissable(onClose)}
 >
   <header>
     <span class="name" title={ds.header[col]}>{ds.header[col]}</span>
@@ -253,7 +238,7 @@
 <style>
   .panel {
     position: fixed;
-    z-index: 60;
+    z-index: var(--z-popover);
     width: 268px;
     display: flex;
     flex-direction: column;

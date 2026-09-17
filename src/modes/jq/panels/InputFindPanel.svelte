@@ -5,6 +5,7 @@
    * 2MB 를 넘으면 스캐너가 포기하므로(포지션 스캔이 O(n) 메모리다) 대신 같은 일을 하는
    * jq 쿼리를 쿼리 패널에 넣어 준다 — 원본 `InputPanel.ts:performFindSearch` 의 동작.
    */
+  import { dismissable } from '../../../lib/ui/dismiss'
   import { filterEntries, scanJson, type JsonEntry } from '../utils/json-position-scanner'
   import { decodeStringified } from '../utils/stringified-fields'
   import { load, save } from '../../../lib/util/storage'
@@ -18,8 +19,10 @@
     onInjectQuery: (query: string) => void
     /** ↧ 버튼 — 이 경로만 unstringify 하도록 Transform 을 연다 */
     onUnstringify: (path: string) => void
+    /** 바깥 클릭 판정에서 제외할 앵커 버튼 */
+    anchor?: HTMLElement | null
   }
-  let { textarea, text, onClose, onInjectQuery, onUnstringify }: Props = $props()
+  let { textarea, text, onClose, onInjectQuery, onUnstringify, anchor }: Props = $props()
 
   const MAX_DISPLAY = 200
   const SCAN_LIMIT = 2 * 1024 * 1024
@@ -135,13 +138,14 @@
     return out
   }
 
+  /** Escape로 닫힐 때 입력으로 포커스를 되돌린다 */
+  function closeAndRefocus(): void {
+    onClose()
+    textarea?.focus()
+  }
+
   function onKeydown(e: KeyboardEvent): void {
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      e.stopPropagation()
-      onClose()
-      textarea?.focus()
-    } else if (e.key === 'Enter') {
+    if (e.key === 'Enter') {
       e.preventDefault()
       if (tooLarge) injectBigQuery()
       else if (shown[0]) goto(shown[0], 0)
@@ -159,7 +163,7 @@
   })
 </script>
 
-<div class="find pop">
+<div class="find pop" {@attach dismissable(closeAndRefocus, { ignore: () => [anchor] })}>
   <div class="find-head">
     <input
       bind:this={inputEl}
@@ -229,7 +233,7 @@
     position: absolute;
     top: calc(100% + 4px);
     right: 0;
-    z-index: 60;
+    z-index: var(--z-popover);
     width: min(620px, 92vw);
     display: flex;
     flex-direction: column;

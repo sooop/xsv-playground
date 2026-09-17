@@ -213,7 +213,7 @@
 <style>
   .menu {
     position: fixed;
-    z-index: 65;
+    z-index: var(--z-menu);
     min-width: 216px;
     max-height: min(560px, calc(100vh - 24px));
     overflow-y: auto;

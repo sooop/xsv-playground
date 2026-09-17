@@ -7,6 +7,7 @@
   import { XLSX_WARN_ROWS } from '../parse/xlsx'
   import { num } from '../util/format'
   import { load, save } from '../util/storage'
+  import Modal from './Modal.svelte'
 
   interface Props {
     ds: Dataset
@@ -55,12 +56,8 @@
     onRun({ ...o })
   }
 
-  function onKeyDown(e: KeyboardEvent): void {
-    e.stopPropagation()
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      onClose()
-    } else if (e.key === 'Enter' && !e.isComposing) {
+  function onKeydown(e: KeyboardEvent): void {
+    if (e.key === 'Enter' && !e.isComposing) {
       e.preventDefault()
       run()
     }
@@ -88,23 +85,7 @@
   ]
 </script>
 
-<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-<div class="scrim" role="presentation" onclick={onClose}></div>
-
-<div
-  class="dlg pop"
-  role="dialog"
-  aria-modal="true"
-  aria-label="내보내기"
-  tabindex="-1"
-  onkeydown={onKeyDown}
->
-  <header>
-    <h2>내보내기</h2>
-    <button class="btn icon" onclick={onClose} aria-label="닫기">✕</button>
-  </header>
-
-  <div class="body">
+<Modal label="내보내기" title="내보내기" width="420px" {onClose} onKeydown={onKeydown}>
     <section>
       <span class="label">범위</span>
       <div class="stack">
@@ -172,7 +153,6 @@
         {/if}
       </div>
     </section>
-  </div>
 
   {#if xlsxSlow}
     <p class="warn">
@@ -180,67 +160,16 @@
     </p>
   {/if}
 
-  <footer>
+  {#snippet footer()}
     <span class="sum">{num(preview.rows)}행 × {num(preview.cols)}열</span>
     <button class="btn" onclick={onClose}>취소</button>
     <button class="btn primary" onclick={run}>
       {o.target === 'clipboard' ? '복사' : '저장'}
     </button>
-  </footer>
-</div>
+  {/snippet}
+</Modal>
 
 <style>
-  .scrim {
-    position: fixed;
-    inset: 0;
-    background: var(--bg-overlay);
-    z-index: 70;
-    animation: fade 140ms var(--ease);
-  }
-  @keyframes fade {
-    from {
-      opacity: 0;
-    }
-  }
-
-  .dlg {
-    position: fixed;
-    z-index: 71;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: min(420px, calc(100vw - 32px));
-    max-height: calc(100vh - 48px);
-    display: flex;
-    flex-direction: column;
-    animation: rise 180ms var(--ease);
-  }
-  @keyframes rise {
-    from {
-      opacity: 0;
-      transform: translate(-50%, calc(-50% + 8px));
-    }
-  }
-
-  header {
-    display: flex;
-    align-items: center;
-    padding: 11px 8px 11px 14px;
-    border-bottom: 1px solid var(--border);
-  }
-  h2 {
-    flex: 1;
-    margin: 0;
-    font-size: 12.5px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-  }
-
-  .body {
-    padding: 4px 14px 12px;
-    overflow-y: auto;
-  }
-
   section {
     padding: 11px 0 0;
   }
@@ -365,15 +294,6 @@
     line-height: 1.45;
   }
 
-  footer {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 10px 12px;
-    border-top: 1px solid var(--border);
-    background: var(--bg-header);
-    border-radius: 0 0 8px 8px;
-  }
   .sum {
     flex: 1;
     color: var(--text-faint);

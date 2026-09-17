@@ -1470,29 +1470,14 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
       return
     }
     if (e.key === 'Escape') {
-      // 열려 있는 오버레이를 위에서부터 하나씩 닫는다
+      // 열려 있는 오버레이를 위에서부터 하나씩 닫는다. 모달(Export·Help·Replace·DocPicker·
+      // SheetPicker·Split·Join)은 각자 Modal이 `modals` 스택에 등록되어 셸(App.svelte)이
+      // 먼저 닫으므로, 여기서는 그 아래 레이어(메뉴·찾기)만 처리한다.
       if (menu || toolsMenu || docMenu) {
         take()
         menu = null
         toolsMenu = null
         docMenu = null
-      } else if (
-        showExport ||
-        showHelp ||
-        showReplace ||
-        showDocPicker ||
-        showSheetPicker ||
-        splitTarget !== null ||
-        joinTargets
-      ) {
-        take()
-        showExport = false
-        showHelp = false
-        showReplace = false
-        showDocPicker = false
-        if (showSheetPicker) closeSheetPicker()
-        splitTarget = null
-        joinTargets = null
       } else if (find.open) {
         take()
         closeFind()

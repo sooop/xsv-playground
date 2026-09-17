@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { SheetSummary } from '../parse/xlsx'
   import { num } from '../util/format'
+  import Modal from './Modal.svelte'
 
   interface Props {
     /** 통합 문서 파일명 — 어느 파일의 시트인지 헤더에 보여준다 */
@@ -20,7 +21,6 @@
   $effect(() => {
     const at = sheets.findIndex((s) => s.name === current)
     if (at >= 0) cursor = at
-    listEl?.focus()
   })
 
   function pick(i: number): void {
@@ -36,12 +36,8 @@
     listEl?.querySelector<HTMLElement>(`[data-i="${cursor}"]`)?.scrollIntoView({ block: 'nearest' })
   }
 
-  function onKeyDown(e: KeyboardEvent): void {
-    e.stopPropagation()
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      onClose()
-    } else if (e.key === 'ArrowDown') {
+  function onKeydown(e: KeyboardEvent): void {
+    if (e.key === 'ArrowDown') {
       e.preventDefault()
       move(1)
     } else if (e.key === 'ArrowUp') {
@@ -54,23 +50,22 @@
   }
 </script>
 
-<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-<div class="scrim" onclick={onClose}></div>
-
-<div class="dlg pop" role="dialog" aria-modal="true" aria-label="시트 선택">
-  <header>
-    <h2>시트 선택</h2>
-    <span class="file" title={fileName}>{fileName}</span>
-    <button class="btn icon" onclick={onClose} aria-label="닫기">✕</button>
-  </header>
-
+<Modal
+  label="시트 선택"
+  title="시트 선택"
+  subtitle={fileName}
+  width="420px"
+  initialFocus={() => listEl}
+  {onClose}
+  onKeydown={onKeydown}
+  plainBody
+>
   <div
     class="list"
     bind:this={listEl}
     role="listbox"
     aria-label="시트 목록"
     tabindex="0"
-    onkeydown={onKeyDown}
   >
     {#each sheets as s, i (s.name)}
       <button
@@ -93,67 +88,13 @@
     {/each}
   </div>
 
-  <footer>
+  {#snippet footer()}
     <span class="hint">↑↓ 이동 · Enter 열기 · Esc 닫기</span>
     <button class="btn" onclick={onClose}>취소</button>
-  </footer>
-</div>
+  {/snippet}
+</Modal>
 
 <style>
-  .scrim {
-    position: fixed;
-    inset: 0;
-    background: var(--bg-overlay);
-    z-index: 70;
-    animation: fade 140ms var(--ease);
-  }
-  @keyframes fade {
-    from {
-      opacity: 0;
-    }
-  }
-
-  .dlg {
-    position: fixed;
-    z-index: 71;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: min(420px, calc(100vw - 32px));
-    max-height: calc(100vh - 48px);
-    display: flex;
-    flex-direction: column;
-    animation: rise 180ms var(--ease);
-  }
-  @keyframes rise {
-    from {
-      opacity: 0;
-      transform: translate(-50%, calc(-50% + 8px));
-    }
-  }
-
-  header {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    padding: 11px 8px 11px 14px;
-    border-bottom: 1px solid var(--border);
-  }
-  h2 {
-    margin: 0;
-    font-size: 12.5px;
-    font-weight: 600;
-  }
-  .file {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--text-faint);
-    font-size: 10.5px;
-  }
-
   .list {
     padding: 6px;
     overflow-y: auto;
@@ -204,15 +145,6 @@
     font-size: 9.5px;
   }
 
-  footer {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 9px 12px;
-    border-top: 1px solid var(--border);
-    background: var(--bg-header);
-    border-radius: 0 0 8px 8px;
-  }
   .hint {
     flex: 1;
     color: var(--text-faint);

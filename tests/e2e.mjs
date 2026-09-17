@@ -1096,7 +1096,7 @@ await page.waitForSelector('[role=menu]')
 await clickMenu('열 나누기')
 await page.waitForSelector('[aria-label="열 나누기"]', { timeout: 3000 })
 check('열 나누기 다이얼로그 열림', true)
-check('대상 열 표시', (await page.$eval('[aria-label="열 나누기"] .target', (e) => e.textContent)) === '상품')
+check('대상 열 표시', (await page.$eval('[aria-label="열 나누기"] .sub', (e) => e.textContent)) === '상품')
 
 await page.evaluate(() => {
   ;[...document.querySelectorAll('[aria-label="열 나누기"] .chip')]

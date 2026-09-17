@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Modal from '../../../lib/ui/Modal.svelte'
   import { mdState } from '../mdState.svelte'
   import type { Heading } from './TocPanel.svelte'
 
@@ -28,7 +29,6 @@
     if (mdState.paletteOpen) {
       query = ''
       selectedIdx = 0
-      setTimeout(() => inputEl?.focus(), 10)
     }
   })
 
@@ -59,7 +59,7 @@
       e.preventDefault()
       select(filtered[selectedIdx])
     }
-    // Esc는 셸이 넘기는 MdMode.handleKeydown이 처리한다
+    // Esc는 Modal이 modals 스택에 등록해 셸이 처리한다
   }
 
   $effect(() => {
@@ -69,8 +69,14 @@
 </script>
 
 {#if mdState.paletteOpen}
-  <div class="backdrop" role="presentation" onclick={close}></div>
-  <div class="palette pop" role="dialog" aria-label="헤딩으로 이동" aria-modal="true">
+  <Modal
+    label="헤딩으로 이동"
+    width="620px"
+    maxHeight="58vh"
+    plainBody
+    initialFocus={() => inputEl}
+    onClose={close}
+  >
     <div class="input-wrap">
       <span class="icon-slot" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"
@@ -111,29 +117,12 @@
         <li class="empty">헤딩을 찾을 수 없습니다</li>
       {/if}
     </ul>
-  </div>
+  </Modal>
 {/if}
 
 <style>
-  .backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 90;
-    background: var(--bg-overlay);
-  }
-  .palette {
-    position: fixed;
-    top: 15vh;
-    left: 50%;
-    transform: translateX(-50%);
-    width: min(520px, 90vw);
-    max-height: 58vh;
-    z-index: 91;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
   .input-wrap {
+    flex: none;
     display: flex;
     align-items: center;
     gap: 9px;
@@ -155,6 +144,8 @@
     font-family: inherit;
   }
   .list {
+    flex: 1;
+    min-height: 0;
     list-style: none;
     overflow-y: auto;
     padding: 5px 0;

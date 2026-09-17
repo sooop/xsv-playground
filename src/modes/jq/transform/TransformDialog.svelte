@@ -8,6 +8,7 @@
    * 덮으면 안 된다.
    */
   import { dialogs } from '../../../lib/ui/dialog/dialog.svelte'
+  import Modal from '../../../lib/ui/Modal.svelte'
   import { toasts } from '../../../lib/ui/toasts.svelte'
   import {
     checkSizeGuard,
@@ -126,7 +127,6 @@
     formatted = ''
 
     scheduleScan()
-    requestAnimationFrame(() => sourceEl?.focus())
     return true
   }
 
@@ -293,119 +293,84 @@
   ])
 </script>
 
-<div
-  class="overlay"
-  role="presentation"
-  onclick={(e) => {
-    if (e.target === e.currentTarget) close()
-  }}
+<Modal
+  label="JSON Transform"
+  title="JSON Transform"
+  width="880px"
+  maxHeight="92vh"
+  initialFocus={() => sourceEl}
+  onClose={close}
 >
-  <div class="modal pop" role="dialog" aria-modal="true" aria-label="JSON Transform">
-    <header class="head">
-      <h2>JSON Transform</h2>
-      <button class="btn icon" onclick={close} title="닫기 (Esc)">×</button>
-    </header>
+  <div class="fields">
+    <label class="label" for="jq-transform-source">Source</label>
+    <textarea
+      id="jq-transform-source"
+      bind:this={sourceEl}
+      class="source"
+      spellcheck="false"
+      placeholder="텍스트를 붙여넣거나 Input에서 불러옵니다..."
+      bind:value={source}
+      oninput={onSourceInput}
+    ></textarea>
 
-    <div class="body">
-      <label class="label" for="jq-transform-source">Source</label>
-      <textarea
-        id="jq-transform-source"
-        bind:this={sourceEl}
-        class="source"
-        spellcheck="false"
-        placeholder="텍스트를 붙여넣거나 Input에서 불러옵니다..."
-        bind:value={source}
-        oninput={onSourceInput}
-      ></textarea>
-
-      <div class="toggles">
-        <label class="chk">
-          <input type="checkbox" bind:checked={extract} onchange={scheduleScan} /> JSON 추출
-        </label>
-        <label class="chk" class:disabled={!spansAvailable} title="선택한 구간만 교체하고 나머지 공백·줄바꿈은 그대로 둡니다">
-          <input
-            type="checkbox"
-            bind:checked={preserveFormat}
-            disabled={!spansAvailable}
-            onchange={schedulePreview}
-          /> 원본 포맷 유지
-        </label>
-      </div>
-
-      {#if guardMessage}
-        <p class="warn">{guardMessage}</p>
-      {/if}
-      {#if clipboardNote}
-        <p class="info">Input이 비어 있어 클립보드 내용을 불러왔습니다.</p>
-      {/if}
-      {#each warnings as w}
-        <p class="info">{w}</p>
-      {/each}
-
-      {#if extract}
-        <div class="section-label">후보 {candidates.length ? `(${candidates.length})` : ''}</div>
-        <CandidateList {candidates} selected={selectedIndex} onSelect={onSelectCandidate} />
-      {/if}
-
-      <div class="section-label">
-        문자열로 감싸인 값 {nodes.length ? `(${selectedKeys.size}/${nodes.length})` : ''}
-        <span class="sec-actions">
-          <button class="btn outline" disabled={nodes.length === 0} onclick={() => tree?.selectAll()}>
-            전체 선택
-          </button>
-          <button class="btn outline" disabled={nodes.length === 0} onclick={() => tree?.clearAll()}>
-            전체 해제
-          </button>
-        </span>
-      </div>
-      <FieldTree bind:this={tree} {nodes} selected={selectedKeys} onChange={onSelectionChange} />
-
-      <div class="section-label">미리보기</div>
-      <TransformPreview text={formatted} {loading} {loadingText} />
+    <div class="toggles">
+      <label class="chk">
+        <input type="checkbox" bind:checked={extract} onchange={scheduleScan} /> JSON 추출
+      </label>
+      <label class="chk" class:disabled={!spansAvailable} title="선택한 구간만 교체하고 나머지 공백·줄바꿈은 그대로 둡니다">
+        <input
+          type="checkbox"
+          bind:checked={preserveFormat}
+          disabled={!spansAvailable}
+          onchange={schedulePreview}
+        /> 원본 포맷 유지
+      </label>
     </div>
 
-    <footer class="foot">
-      <button class="btn outline" disabled={!formatted} onclick={() => void copyOut()}>복사</button>
-      <button class="btn primary" disabled={!formatted} onclick={apply}>Input에 적용</button>
-      <button class="btn outline" onclick={close}>취소</button>
-    </footer>
+    {#if guardMessage}
+      <p class="warn">{guardMessage}</p>
+    {/if}
+    {#if clipboardNote}
+      <p class="info">Input이 비어 있어 클립보드 내용을 불러왔습니다.</p>
+    {/if}
+    {#each warnings as w}
+      <p class="info">{w}</p>
+    {/each}
+
+    {#if extract}
+      <div class="section-label">후보 {candidates.length ? `(${candidates.length})` : ''}</div>
+      <CandidateList {candidates} selected={selectedIndex} onSelect={onSelectCandidate} />
+    {/if}
+
+    <div class="section-label">
+      문자열로 감싸인 값 {nodes.length ? `(${selectedKeys.size}/${nodes.length})` : ''}
+      <span class="sec-actions">
+        <button class="btn outline" disabled={nodes.length === 0} onclick={() => tree?.selectAll()}>
+          전체 선택
+        </button>
+        <button class="btn outline" disabled={nodes.length === 0} onclick={() => tree?.clearAll()}>
+          전체 해제
+        </button>
+      </span>
+    </div>
+    <FieldTree bind:this={tree} {nodes} selected={selectedKeys} onChange={onSelectionChange} />
+
+    <div class="section-label">미리보기</div>
+    <TransformPreview text={formatted} {loading} {loadingText} />
   </div>
-</div>
+
+  {#snippet footer()}
+    <button class="btn outline" onclick={close}>취소</button>
+    <button class="btn outline" disabled={!formatted} onclick={() => void copyOut()}>복사</button>
+    <button class="btn primary" disabled={!formatted} onclick={apply}>Input에 적용</button>
+  {/snippet}
+</Modal>
 
 <style>
-  .overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 200;
-    display: grid;
-    place-items: center;
-    padding: 20px;
-    background: var(--bg-overlay);
-  }
-  .modal {
-    display: flex;
-    flex-direction: column;
-    width: min(880px, 96vw);
-    max-height: 92vh;
-  }
-  .head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 9px 12px;
-    border-bottom: 1px solid var(--border-soft);
-  }
-  h2 {
-    margin: 0;
-    font-size: 13px;
-    font-weight: 600;
-  }
-  .body {
+  .fields {
     display: flex;
     flex-direction: column;
     gap: 6px;
-    padding: 10px 12px;
-    overflow-y: auto;
   }
   .source {
     height: 110px;
@@ -469,12 +434,5 @@
   }
   .info {
     color: var(--text-dim);
-  }
-  .foot {
-    display: flex;
-    justify-content: flex-end;
-    gap: 6px;
-    padding: 9px 12px;
-    border-top: 1px solid var(--border-soft);
   }
 </style>

@@ -27,6 +27,17 @@
   --ease: cubic-bezier(0.32, 0.72, 0, 1);
   --dur: 130ms;
 
+  /*
+   * 겹침 순서 — 값은 여기서만 정한다. 팝오버(앵커에 붙는 것) < 컨텍스트 메뉴 < 모달 < 토스트
+   * < 시스템 확인창(alert/confirm/prompt — 모달 위에서도 떠야 한다). 컴포넌트는 이 토큰만 쓰고,
+   * 같은 대역 안에서 스크림/패널처럼 두 층이 필요하면 `calc(var(--z-…) + 1)`로 만든다.
+   */
+  --z-popover: 400;
+  --z-menu: 500;
+  --z-modal: 1000;
+  --z-toast: 1500;
+  --z-system-dialog: 2000;
+
   color-scheme: dark;
 
   /* --- 다크 (기본) --- */
@@ -287,6 +298,22 @@ select {
 .btn.on {
   color: var(--accent);
   background: var(--accent-soft);
+}
+/* 파괴적 액션 — 확인창의 danger 톤과 같은 색 */
+.btn.danger {
+  color: var(--danger);
+}
+.btn.danger:hover:not(:disabled) {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.btn.primary.danger {
+  background: var(--danger);
+  color: #fff;
+}
+.btn.primary.danger:hover:not(:disabled) {
+  background: var(--danger);
+  color: #fff;
 }
 
 /* 대문자 레터스페이스 라벨 — 계측기 눈금 같은 성격 */

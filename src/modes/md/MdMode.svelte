@@ -40,8 +40,16 @@
   let readerEl = $state<Reader | null>(null)
   let searchBarEl = $state<SearchBar | null>(null)
   let readerScrollEl = $state<HTMLElement | null>(null)
+  let lightboxCloseBtn = $state<HTMLButtonElement | null>(null)
   $effect(() => {
     readerScrollEl = readerEl?.getScrollEl() ?? null
+  })
+
+  // 라이트박스가 열리면 닫기 버튼에 초기 포커스를 준다
+  $effect(() => {
+    if (!mdState.lightboxSrc) return
+    const raf = requestAnimationFrame(() => lightboxCloseBtn?.focus())
+    return () => cancelAnimationFrame(raf)
   })
 
   // ── 불러오기 ──────────────────────────────────────────────────────────────
@@ -216,13 +224,11 @@
       if (mdState.lightboxSrc) {
         take()
         mdState.closeLightbox()
-      } else if (mdState.paletteOpen) {
-        take()
-        mdState.togglePalette(false)
       } else if (mdState.searchOpen) {
         take()
         closeSearch()
       }
+      // 팔레트의 Esc는 Modal이 modals 스택에 등록해 셸이 처리한다
       return
     }
     if (!editable && !mod && !e.altKey) {
@@ -394,6 +400,8 @@
 
   {#if mdState.lightboxSrc}
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- 키보드 닫기는 handleKeydown의 전역 Escape 처리가 맡는다(이중 처리 방지로 여기서는 제거) -->
     <div
       class="lightbox-backdrop"
       role="dialog"
@@ -401,15 +409,17 @@
       aria-modal="true"
       tabindex="-1"
       onclick={() => mdState.closeLightbox()}
-      onkeydown={(e) => {
-        if (e.key === 'Escape') mdState.closeLightbox()
-      }}
     >
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="lightbox-img-wrap" role="presentation" onclick={(e) => e.stopPropagation()} onwheel={handleLightboxWheel}>
         <img src={mdState.lightboxSrc} alt="확대 이미지" class="lightbox-img" />
       </div>
-      <button class="btn icon lightbox-close" onclick={() => mdState.closeLightbox()} aria-label="닫기">
+      <button
+        bind:this={lightboxCloseBtn}
+        class="btn icon lightbox-close"
+        onclick={() => mdState.closeLightbox()}
+        aria-label="닫기"
+      >
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"
           stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
       </button>
@@ -509,7 +519,8 @@
   .lightbox-backdrop {
     position: fixed;
     inset: 0;
-    z-index: 200;
+    z-index: var(--z-modal);
+    /* 이미지 뷰어는 뒤 콘텐츠를 완전히 가려야 하므로 --bg-overlay 대신 진한 스크림을 고정한다 */
     background: rgba(0, 0, 0, 0.85);
     display: flex;
     align-items: center;
@@ -535,6 +546,7 @@
   }
   .lightbox-close {
     position: fixed;
+    z-index: calc(var(--z-modal) + 1);
     top: 16px;
     right: 20px;
     width: 36px;

@@ -18,6 +18,8 @@
   let ta = $state<HTMLTextAreaElement | null>(null)
   let historyOpen = $state(false)
   let savedOpen = $state(false)
+  let historyBtn = $state<HTMLButtonElement | null>(null)
+  let savedBtn = $state<HTMLButtonElement | null>(null)
 
   const ac = new AutocompleteEngine({
     el: () => ta,
@@ -164,8 +166,12 @@
     <div class="panel-actions">
       <button class="btn primary" title="실행 (Ctrl+Enter)" onclick={() => jq.runNow()}>실행</button>
       <button class="btn" onclick={() => void saveCurrent()}>저장</button>
-      <button class="btn" class:on={savedOpen} onclick={() => (savedOpen = !savedOpen)}>저장됨</button>
-      <button class="btn" class:on={historyOpen} onclick={() => (historyOpen = !historyOpen)}>히스토리</button>
+      <button bind:this={savedBtn} class="btn" class:on={savedOpen} onclick={() => (savedOpen = !savedOpen)}>
+        저장됨
+      </button>
+      <button bind:this={historyBtn} class="btn" class:on={historyOpen} onclick={() => (historyOpen = !historyOpen)}>
+        히스토리
+      </button>
       <button class="btn" onclick={() => setQuery('')}>비우기</button>
     </div>
 
@@ -176,6 +182,7 @@
           historyOpen = false
         }}
         onClose={() => (historyOpen = false)}
+        anchor={historyBtn}
       />
     {/if}
     {#if savedOpen}
@@ -185,6 +192,7 @@
           savedOpen = false
         }}
         onClose={() => (savedOpen = false)}
+        anchor={savedBtn}
       />
     {/if}
   </header>

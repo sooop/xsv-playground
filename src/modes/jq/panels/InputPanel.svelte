@@ -35,6 +35,8 @@
 
   let ta = $state<HTMLTextAreaElement | null>(null)
   let fileEl = $state<HTMLInputElement | null>(null)
+  let historyBtn = $state<HTMLButtonElement | null>(null)
+  let findBtn = $state<HTMLButtonElement | null>(null)
   let showParseCsv = $state(false)
   let historyOpen = $state(false)
   let findOpen = $state(false)
@@ -254,10 +256,18 @@
       {/if}
       <button class="btn" onclick={clearInput}>비우기</button>
       <button class="btn" onclick={() => fileEl?.click()}>파일 열기</button>
-      <button class="btn" class:on={findOpen} title="JSON 안에서 찾기 (Ctrl+F)" onclick={() => (findOpen = !findOpen)}>
+      <button
+        bind:this={findBtn}
+        class="btn"
+        class:on={findOpen}
+        title="JSON 안에서 찾기 (Ctrl+F)"
+        onclick={() => (findOpen = !findOpen)}
+      >
         찾기
       </button>
-      <button class="btn" class:on={historyOpen} onclick={() => (historyOpen = !historyOpen)}>히스토리</button>
+      <button bind:this={historyBtn} class="btn" class:on={historyOpen} onclick={() => (historyOpen = !historyOpen)}>
+        히스토리
+      </button>
       <input
         bind:this={fileEl}
         type="file"
@@ -268,7 +278,11 @@
     </div>
 
     {#if historyOpen}
-      <InputHistoryMenu onPick={(e) => void pickHistory(e)} onClose={() => (historyOpen = false)} />
+      <InputHistoryMenu
+        onPick={(e) => void pickHistory(e)}
+        onClose={() => (historyOpen = false)}
+        anchor={historyBtn}
+      />
     {/if}
     {#if findOpen}
       <InputFindPanel
@@ -283,6 +297,7 @@
           findOpen = false
           onOpenTransform({ source: 'input', extract: false, focusPaths: [path] })
         }}
+        anchor={findBtn}
       />
     {/if}
   </header>

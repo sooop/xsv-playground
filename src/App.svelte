@@ -1,6 +1,7 @@
 <script lang="ts">
   import DialogHost from './lib/ui/dialog/DialogHost.svelte'
   import { dialogs } from './lib/ui/dialog/dialog.svelte'
+  import { modals } from './lib/ui/modals.svelte'
   import Toast from './lib/ui/Toast.svelte'
   import { toasts } from './lib/ui/toasts.svelte'
   import CsvMode from './modes/csv/CsvMode.svelte'
@@ -85,6 +86,12 @@
       return
     }
     if (dialogs.pending > 0) return
+    // 공용 모달이 떠 있으면 Escape는 맨 위 모달을 닫는 것으로 끝난다 — 모드에는 넘기지 않는다
+    if (e.key === 'Escape' && modals.closeTop()) {
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
     if (mod && !e.shiftKey && !e.altKey && (e.key === 'o' || e.key === 'O')) {
       e.preventDefault()
       e.stopPropagation()

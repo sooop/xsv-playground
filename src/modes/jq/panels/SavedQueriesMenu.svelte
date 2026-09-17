@@ -1,6 +1,7 @@
 <script lang="ts">
   /** 저장된 쿼리 드롭다운 — 퍼지 검색 · 삭제 · 내보내기/가져오기. 고르면 최근 사용으로 올린다. */
   import { dialogs } from '../../../lib/ui/dialog/dialog.svelte'
+  import { dismissable } from '../../../lib/ui/dismiss'
   import { toasts } from '../../../lib/ui/toasts.svelte'
   import { downloadText } from '../core/file-handler'
   import {
@@ -16,8 +17,10 @@
   interface Props {
     onPick: (query: string) => void
     onClose: () => void
+    /** 바깥 클릭 판정에서 제외할 앵커 버튼 */
+    anchor?: HTMLElement | null
   }
-  let { onPick, onClose }: Props = $props()
+  let { onPick, onClose, anchor }: Props = $props()
 
   let all = $state.raw<SavedQuery[]>([])
   let term = $state('')
@@ -119,7 +122,7 @@
   })
 </script>
 
-<div class="menu pop">
+<div class="menu pop" {@attach dismissable(onClose, { ignore: () => [anchor] })}>
   <div class="menu-head">
     <input bind:this={searchEl} class="field" type="text" placeholder="저장된 쿼리 검색..." bind:value={term} />
     <button class="btn outline" onclick={() => fileEl?.click()}>가져오기</button>
@@ -150,7 +153,7 @@
     position: absolute;
     top: calc(100% + 4px);
     right: 0;
-    z-index: 60;
+    z-index: var(--z-popover);
     width: min(520px, 90vw);
     display: flex;
     flex-direction: column;

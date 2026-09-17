@@ -1,11 +1,20 @@
 /**
- * jq Pipe Chain Analyzer
- * Parses pipe segments considering bracket/parenthesis depth
+ * jq 파이프 체인 분석기 — 커서 앞 쿼리를 파이프 세그먼트로 나누고, 마지막 세그먼트가
+ * 함수 인자 안인지 · 객체 구성 안인지 · `as $var` 바인딩 뒤인지를 판단한다. 자동완성 엔진이
+ * "지금 커서 위치에서 어떤 후보를 보여줄지"를 정하는 근거다.
  *
- * 이식 메모: 원본(jq-playground)의 알려진 버그 4건(작은따옴표를 문자열로 취급, `}` 이후
- * `lastOpenBraceIndex` 복구 실패, 중첩 함수 판정의 과잉 매칭, `getSegmentTransformation`의
- * 문자열 접두 판정)은 **그대로 둔다** — 동작을 바꾸지 않는 것이 이식 범위다.
+ * 문자 단위 스캔 대신 `jq-tokenizer`의 토큰 스트림 위에서 동작한다. 원본(jq-playground)의
+ * 정규식·수동 스캔 구현에 있던 결함들이 이 한 번의 교체로 함께 사라진다:
+ *  - 객체 구성 안의 파이프(`{a: .x | length}`)를 최상위 파이프로 잘못 쪼갬 (중괄호 깊이 미추적)
+ *  - 문자열 리터럴 안의 `:` `,`를 구문 요소로 오인 (`{k: "a: b, c", name`)
+ *  - 단축 구조분해(`as {$a, $b}`)의 변수 미추출
+ *  - `"path\\\\"` 같은 연속 백슬래시의 패리티 미확인으로 문자열 경계 오판
+ *  - jq에 없는 작은따옴표를 문자열 구분자로 취급해 `test("it's")` 뒤를 통째로 삼킴
+ *  - 중첩 객체가 닫힌 뒤(`{a: {b: 1}, c`) 바깥 중괄호로 돌아가지 못함
+ *  - 중첩 함수 판정 정규식(`[^)]*`)이 `map(select(.a) | .b`에서 이미 닫힌 `select(`를 잡음
+ *  - `getSegmentTransformation`의 `startsWith('map(')`가 `map (`을 놓치고 `..`을 필드 접근으로 봄
  */
+import { computeNesting, splitTokensByPipe, tokenize, type Token } from './jq-tokenizer'
 
 /** `analyzeObjectConstruction` 결과 */
 export interface ObjectContext {
@@ -42,30 +51,46 @@ export interface SegmentTransformation {
   accessesField?: boolean
 }
 
+/** 인자로 받은 필터를 "각 요소에" 적용하는 함수 — 이 안에서는 요소의 필드를 제안한다 */
+const FIELD_FUNCS = new Set([
+  'map',
+  'select',
+  'sort_by',
+  'group_by',
+  'unique_by',
+  'min_by',
+  'max_by',
+  'map_values',
+  'any',
+  'all',
+  'first',
+  'last',
+  'until',
+  'while',
+  'recurse_down',
+])
+
+const isTrivia = (t: Token): boolean => t.type === 'whitespace' || t.type === 'comment'
+
+/** 토큰 구간을 원문에서 잘라낸다 (토큰 값을 이어 붙이면 원문 공백이 어긋날 수 있다) */
+function sliceOf(text: string, tokens: Token[]): string {
+  if (tokens.length === 0) return ''
+  return text.slice(tokens[0].start, tokens[tokens.length - 1].end)
+}
+
 export class PipeAnalyzer {
-  /**
-   * Analyze query at cursor position
-   * @param {string} query - Full query
-   * @param {number} cursor - Cursor position
-   * @returns {Object} Analysis result
-   */
+  /** 커서 위치에서의 문맥 분석 */
   static analyze(query: string, cursor: number): PipeAnalysis {
-    const beforeCursor = query.substring(0, cursor);
-    const segments = this.splitByPipes(beforeCursor);
-    const lastSegment = segments[segments.length - 1] || '';
+    const beforeCursor = query.substring(0, cursor)
+    const segments = this.splitByPipes(beforeCursor)
+    const lastSegment = segments[segments.length - 1] || ''
 
-    // Analyze function context in last segment
-    const funcContext = this.analyzeFunctionContext(lastSegment);
+    const funcContext = this.analyzeFunctionContext(lastSegment)
+    const objectContext = this.analyzeObjectConstruction(lastSegment)
 
-    // Analyze object construction context
-    const objectContext = this.analyzeObjectConstruction(lastSegment);
-
-    // Calculate completedQuery (all segments before current)
-    const completedSegments = segments.slice(0, -1);
-    const completedQuery = completedSegments.join(' | ');
-
-    // Calculate effectiveContextQuery (handles 'as $var' bindings)
-    const effectiveContextQuery = this.calculateEffectiveContextQuery(completedSegments);
+    const completedSegments = segments.slice(0, -1)
+    const completedQuery = completedSegments.join(' | ')
+    const effectiveContextQuery = this.calculateEffectiveContextQuery(completedSegments)
 
     return {
       segments,
@@ -74,325 +99,195 @@ export class PipeAnalyzer {
       effectiveContextQuery,
       depth: segments.length - 1,
       ...funcContext,
-      ...objectContext
-    };
+      ...objectContext,
+    }
   }
 
-  /**
-   * Parse 'EXPR as $var' binding pattern
-   * @param {string} segment - Segment to parse
-   * @returns {Object|null} Binding info or null
-   */
+  /** `EXPR as $var` 바인딩 세그먼트 파싱 */
   static parseAsBinding(segment: string): { expression: string; variable: string } | null {
-    // Match "EXPR as $var" pattern - capture EXPR and variable name
-    const match = segment.match(/^(.+?)\s+as\s+(\$\w+)\s*$/);
-    return match ? { expression: match[1]!.trim(), variable: match[2]! } : null;
+    const match = segment.match(/^(.+?)\s+as\s+(\$\w+)\s*$/)
+    return match ? { expression: match[1]!.trim(), variable: match[2]! } : null
   }
 
   /**
-   * Calculate effective context query by handling 'as $var' bindings
-   * In jq, "EXPR as $var" binds EXPR result to $var but passes original input through
-   * So for context, we need the query BEFORE the 'as' segment
-   * @param {string[]} completedSegments - Array of completed segments
-   * @returns {string} Effective context query
+   * `as $var`는 값을 변수에 묶고 **원래 입력을 그대로 통과**시키므로, 컨텍스트 쿼리는
+   * `as` 세그먼트 앞까지다.
    */
   static calculateEffectiveContextQuery(completedSegments: string[]): string {
-    if (completedSegments.length === 0) return '';
-
-    // Check if last completed segment has 'as $var' binding
-    const lastSegment = completedSegments[completedSegments.length - 1];
-    const binding = this.parseAsBinding(lastSegment);
-
-    if (binding) {
-      // Remove the entire 'as' segment - context is from segments before it
-      const effectiveSegments = completedSegments.slice(0, -1);
-      return effectiveSegments.join(' | ');
-    }
-
-    return completedSegments.join(' | ');
+    if (completedSegments.length === 0) return ''
+    const lastSegment = completedSegments[completedSegments.length - 1]
+    if (this.parseAsBinding(lastSegment)) return completedSegments.slice(0, -1).join(' | ')
+    return completedSegments.join(' | ')
   }
 
   /**
-   * Analyze object construction syntax in a segment
-   * Detects patterns like {name, age}, {key: .field}, {name, username: .name}
-   * @param {string} segment - Current segment
-   * @returns {Object} Object construction context
+   * 객체 구성 문맥 — `{name, age}`, `{key: .field}`, `{name, username: .name` 등.
+   *
+   * 마지막으로 **닫히지 않은** `{`를 스택으로 찾는다(중첩 객체가 닫히면 바깥 것으로 돌아간다).
+   * 그 안에서 같은 깊이의 마지막 `,` 뒤가 현재 필드다. 문자열 안의 `:` `,`는 토큰이 아니므로
+   * 자연히 무시된다.
    */
   static analyzeObjectConstruction(segment: string): ObjectContext {
     const result: ObjectContext = {
       isInsideObjectConstruction: false,
       isAfterColon: false,
       isShorthandPosition: false,
-      incompleteField: ''
-    };
-
-    // Find the last unmatched opening brace
-    let braceDepth = 0;
-    let lastOpenBraceIndex = -1;
-    let inString = false;
-    let stringChar = '';
-
-    for (let i = 0; i < segment.length; i++) {
-      const char = segment[i];
-      const prevChar = segment[i - 1];
-
-      // String handling
-      if ((char === '"' || char === "'") && prevChar !== '\\') {
-        if (!inString) {
-          inString = true;
-          stringChar = char;
-        } else if (char === stringChar) {
-          inString = false;
-        }
-      }
-
-      if (!inString) {
-        if (char === '{') {
-          braceDepth++;
-          lastOpenBraceIndex = i;
-        } else if (char === '}') {
-          braceDepth--;
-          if (braceDepth === 0) lastOpenBraceIndex = -1;
-        }
-      }
+      incompleteField: '',
     }
 
-    // Not inside object construction
-    if (braceDepth <= 0 || lastOpenBraceIndex === -1) {
-      return result;
+    const tokens = tokenize(segment)
+    const openBraces: number[] = []
+    for (let i = 0; i < tokens.length; i++) {
+      const t = tokens[i]
+      if (t.type === 'lbrace') openBraces.push(i)
+      else if (t.type === 'rbrace') openBraces.pop()
     }
+    if (openBraces.length === 0) return result
 
-    result.isInsideObjectConstruction = true;
+    result.isInsideObjectConstruction = true
+    const braceIdx = openBraces[openBraces.length - 1]
+    const inner = tokens.slice(braceIdx + 1)
+    const nesting = computeNesting(inner)
 
-    // Analyze content after the last opening brace
-    const insideBrace = segment.substring(lastOpenBraceIndex + 1);
-
-    // Find position after last comma or at start
-    let lastCommaOrStart = -1;
-    let colonCount = 0;
-    let parenDepth = 0;
-
-    for (let i = 0; i < insideBrace.length; i++) {
-      const char = insideBrace[i];
-
-      if (char === '(') parenDepth++;
-      else if (char === ')') parenDepth--;
-      else if (parenDepth === 0) {
-        if (char === ',') {
-          lastCommaOrStart = i;
-          colonCount = 0; // Reset colon count after comma
-        } else if (char === ':') {
-          colonCount++;
-        }
+    // 중괄호 바로 안 깊이(모두 0)의 마지막 콤마 뒤가 현재 필드
+    let lastComma = -1
+    for (let i = 0; i < inner.length; i++) {
+      const n = nesting[i]
+      if (inner[i].type === 'comma' && n.parenDepth === 0 && n.bracketDepth === 0 && n.braceDepth === 0) {
+        lastComma = i
       }
     }
+    const field = inner.slice(lastComma + 1)
+    const fieldNesting = nesting.slice(lastComma + 1)
+    const colonIdx = field.findIndex(
+      (t, i) =>
+        t.type === 'colon' &&
+        fieldNesting[i].parenDepth === 0 &&
+        fieldNesting[i].bracketDepth === 0 &&
+        fieldNesting[i].braceDepth === 0,
+    )
 
-    // Get content after last comma (or from start)
-    const currentField = insideBrace.substring(lastCommaOrStart + 1).trim();
-
-    // Check if we're after a colon in the current field
-    const colonInCurrentField = currentField.includes(':');
-
-    if (colonInCurrentField) {
-      result.isAfterColon = true;
-      // Extract what's after the colon
-      const afterColon = currentField.substring(currentField.indexOf(':') + 1).trim();
-      // Check if it starts with '.' for field access
+    if (colonIdx >= 0) {
+      result.isAfterColon = true
+      const afterColon = sliceOf(segment, field.slice(colonIdx + 1)).trim()
       if (afterColon.startsWith('.')) {
-        const fieldMatch = afterColon.match(/^\.([\w]*)/);
-        result.incompleteField = fieldMatch ? fieldMatch[1]! : '';
+        const m = afterColon.match(/^\.(\w*)/)
+        result.incompleteField = m ? m[1]! : ''
       }
     } else {
-      // No colon in current position - shorthand position
-      result.isShorthandPosition = true;
-      // Extract the incomplete field name (e.g., "na" from "{na" or "{age, na")
-      const fieldMatch = currentField.match(/^(\w*)$/);
-      result.incompleteField = fieldMatch ? fieldMatch[1]! : '';
+      result.isShorthandPosition = true
+      const current = sliceOf(segment, field).trim()
+      const m = current.match(/^(\w*)$/)
+      result.incompleteField = m ? m[1]! : ''
     }
-
-    return result;
+    return result
   }
 
   /**
-   * Split query by pipes considering parenthesis depth
-   * @param {string} query - Query string
-   * @returns {string[]} Array of segments
+   * 최상위 파이프로 분할 — 괄호·대괄호·중괄호 어느 것도 열려 있지 않은 `|`에서만 나눈다.
+   * `|=`는 별도 연산자 토큰이라 나누지 않는다.
    */
   static splitByPipes(query: string): string[] {
-    const segments: string[] = [];
-    let current = '';
-    let parenDepth = 0;
-    let bracketDepth = 0;
-    let inString = false;
-    let stringChar = '';
-
-    for (let i = 0; i < query.length; i++) {
-      const char = query[i];
-      const prevChar = query[i - 1];
-
-      // String handling
-      if ((char === '"' || char === "'") && prevChar !== '\\') {
-        if (!inString) {
-          inString = true;
-          stringChar = char;
-        } else if (char === stringChar) {
-          inString = false;
-        }
-      }
-
-      if (!inString) {
-        if (char === '(') parenDepth++;
-        else if (char === ')') parenDepth--;
-        else if (char === '[') bracketDepth++;
-        else if (char === ']') bracketDepth--;
-
-        // Only split on pipe at depth 0
-        if (char === '|' && parenDepth === 0 && bracketDepth === 0) {
-          if (current.trim()) segments.push(current.trim());
-          current = '';
-          continue;
-        }
-      }
-
-      current += char;
-    }
-
-    if (current.trim()) segments.push(current.trim());
-    return segments;
+    const tokens = tokenize(query)
+    return splitTokensByPipe(tokens)
+      .map((seg) => sliceOf(query, seg).trim())
+      .filter((s) => s !== '')
   }
 
   /**
-   * Analyze function context in a segment
-   * Detects patterns like map(.field), select(.field > 0), etc.
-   * @param {string} segment - Current segment
-   * @returns {Object} Function context info
+   * 함수 인자 문맥 — `map(.field`, `select(.a > 0) | map(select(.b` 등.
+   *
+   * 닫히지 않은 `(`들을 스택으로 추적해, 그중 **가장 안쪽**의 알려진 함수 호출을 고른다.
+   * 그 함수 이름과 `(` 뒤의 텍스트(필드 경로)를 돌려준다. 원본은 중첩이면 `'nested'`라는
+   * 가짜 이름을 돌려줬지만, 후보를 고르는 데 필요한 것은 실제 안쪽 함수의 입력 타입이다.
    */
   static analyzeFunctionContext(segment: string): FunctionContext {
-    // Match functions that operate on each element: map(.field), select(.field), sort_by(.field), etc.
-    // Pattern: function_name( followed by optional whitespace, then a field path or object construction
-    const funcMatch = segment.match(
-      /^(map|select|sort_by|group_by|unique_by|min_by|max_by|map_values|any|all|first|last|until|while|recurse_down)\s*\(\s*([.{].*)?$/
-    );
-
-    if (funcMatch) {
-      return {
-        isInsideFunction: true,
-        functionName: funcMatch[1]!,
-        fieldPath: funcMatch[2] || '.'
-      };
+    const tokens = tokenize(segment)
+    // [lparen 인덱스, 앞 식별자] 스택
+    const open: { paren: number; name: string | null }[] = []
+    for (let i = 0; i < tokens.length; i++) {
+      const t = tokens[i]
+      if (t.type === 'lparen') {
+        let j = i - 1
+        while (j >= 0 && isTrivia(tokens[j])) j--
+        const prev = j >= 0 ? tokens[j] : null
+        open.push({ paren: i, name: prev && prev.type === 'ident' ? prev.value : null })
+      } else if (t.type === 'rparen') {
+        open.pop()
+      }
     }
 
-    // Check for nested function calls like: map(select(.field
-    const nestedMatch = segment.match(
-      /(?:map|select|sort_by|group_by|unique_by|min_by|max_by|map_values)\s*\([^)]*(?:map|select|sort_by|group_by|unique_by|min_by|max_by|map_values)\s*\(\s*([.{].*)?$/
-    );
-
-    if (nestedMatch) {
-      return {
-        isInsideFunction: true,
-        functionName: 'nested',
-        fieldPath: nestedMatch[1] || '.'
-      };
+    for (let k = open.length - 1; k >= 0; k--) {
+      const { paren, name } = open[k]
+      if (!name || !FIELD_FUNCS.has(name)) continue
+      // 인자 안에 파이프가 있으면(`map(select(.a) | .b`) 마지막 파이프 세그먼트가 현재 필드 경로다
+      const inner = this.splitByPipes(segment.slice(tokens[paren].end))
+      const after = inner.length > 0 ? inner[inner.length - 1] : ''
+      // 인자 자리가 비었거나 필드 경로·객체 구성으로 시작할 때만 "필드를 제안할 문맥"이다
+      if (after !== '' && !after.startsWith('.') && !after.startsWith('{')) break
+      return { isInsideFunction: true, functionName: name, fieldPath: after || '.' }
     }
 
-    // Not inside a function, extract field path from segment
-    const fieldMatch = segment.match(/^\s*(\.[\w.[\]]*)?$/);
-
+    const fieldMatch = segment.match(/^\s*(\.[\w.[\]]*)?$/)
     return {
       isInsideFunction: false,
       functionName: null,
-      fieldPath: fieldMatch ? (fieldMatch[1] || segment) : segment
-    };
+      fieldPath: fieldMatch ? fieldMatch[1] || segment : segment,
+    }
   }
 
   /**
-   * Extract all variables defined in query before cursor position
-   * @param {string} query - Full query
-   * @param {number} cursor - Cursor position (only scan before this)
-   * @returns {string[]} Variable names ['$var1', '$var2', ...]
+   * 커서 앞에서 정의된 변수 — `EXPR as $x`, 구조분해 `as {key: $v, $short}` / `as [$a, $b]`
+   * (중첩·`?//` 대안 포함), 그리고 항상 있는 `$ENV` `$__loc__`.
    */
   static extractVariables(query: string, cursor: number): string[] {
-    const beforeCursor = query.substring(0, cursor);
-    const variables = new Set<string>();
+    const tokens = tokenize(query.substring(0, cursor)).filter((t) => !isTrivia(t))
+    const variables = new Set<string>()
 
-    // 1. as $var pattern (e.g., .price as $p)
-    const asMatches = beforeCursor.matchAll(/\bas\s+(\$\w+)/g);
-    for (const m of asMatches) variables.add(m[1]!);
-
-    // 2. Destructuring: as {key: $var, ...} or as [$a, $b]
-    const destructObjMatches = beforeCursor.matchAll(/\bas\s*\{([^}]+)\}/g);
-    for (const m of destructObjMatches) {
-      const inner = m[1]!;
-      const varMatches = inner.matchAll(/:\s*(\$\w+)/g);
-      for (const vm of varMatches) variables.add(vm[1]!);
+    for (let i = 0; i < tokens.length; i++) {
+      const t = tokens[i]
+      if (t.type !== 'keyword' || t.value !== 'as') continue
+      const next = tokens[i + 1]
+      if (!next) continue
+      if (next.type === 'variable') {
+        variables.add(next.value)
+        continue
+      }
+      if (next.type === 'lbrace' || next.type === 'lbracket') {
+        // 패턴이 닫힐 때까지의 모든 변수 토큰 — 키 자리에 `$var`는 올 수 없으므로 전부 바인딩이다
+        let depth = 0
+        for (let j = i + 1; j < tokens.length; j++) {
+          const u = tokens[j]
+          if (u.type === 'lbrace' || u.type === 'lbracket') depth++
+          else if (u.type === 'rbrace' || u.type === 'rbracket') {
+            depth--
+            if (depth === 0) break
+          } else if (u.type === 'variable') variables.add(u.value)
+        }
+      }
     }
 
-    const destructArrMatches = beforeCursor.matchAll(/\bas\s*\[([^\]]+)\]/g);
-    for (const m of destructArrMatches) {
-      const inner = m[1]!;
-      const varMatches = inner.matchAll(/(\$\w+)/g);
-      for (const vm of varMatches) variables.add(vm[1]!);
-    }
-
-    // 3. Built-in variables (always available)
-    variables.add('$ENV');
-    variables.add('$__loc__');
-
-    return [...variables];
+    variables.add('$ENV')
+    variables.add('$__loc__')
+    return [...variables]
   }
 
-  /**
-   * Check if segment has array access
-   * @param {string} segment - Segment to check
-   * @returns {boolean}
-   */
+  /** 배열 접근(`[]`, `[n]`)이 있는지 */
   static hasArrayAccess(segment: string): boolean {
-    return /\[\]|\[\d+\]/.test(segment);
+    return /\[\]|\[\d+\]/.test(segment)
   }
 
-  /**
-   * Get the transformation applied by a segment
-   * @param {string} segment - Segment to analyze
-   * @returns {Object} Transformation info
-   */
+  /** 세그먼트가 입력을 어떻게 바꾸는지 — 컨텍스트 추론의 힌트 */
   static getSegmentTransformation(segment: string): SegmentTransformation {
-    const trimmed = segment.trim();
-
-    // Array iteration
-    if (trimmed === '.[]' || trimmed.endsWith('[]')) {
-      return { type: 'iterate', unwrapsArray: true };
-    }
-
-    // Array indexing
-    if (/\[\d+\]$/.test(trimmed)) {
-      return { type: 'index', unwrapsArray: true };
-    }
-
-    // map produces array
-    if (trimmed.startsWith('map(') || trimmed.startsWith('map_values(')) {
-      return { type: 'map', producesArray: true };
-    }
-
-    // select filters but preserves structure
-    if (trimmed.startsWith('select(')) {
-      return { type: 'filter', preservesStructure: true };
-    }
-
-    // group_by produces array of arrays
-    if (trimmed.startsWith('group_by(')) {
-      return { type: 'group', producesNestedArray: true };
-    }
-
-    // sort_by preserves array
-    if (trimmed.startsWith('sort_by(') || trimmed.startsWith('unique_by(')) {
-      return { type: 'sort', preservesArray: true };
-    }
-
-    // Field access
-    if (trimmed.startsWith('.')) {
-      return { type: 'field', accessesField: true };
-    }
-
-    return { type: 'unknown' };
+    const trimmed = segment.trim()
+    if (trimmed === '.[]' || trimmed.endsWith('[]')) return { type: 'iterate', unwrapsArray: true }
+    if (/\[\d+\]$/.test(trimmed)) return { type: 'index', unwrapsArray: true }
+    if (/^(map|map_values)\s*\(/.test(trimmed)) return { type: 'map', producesArray: true }
+    if (/^select\s*\(/.test(trimmed)) return { type: 'filter', preservesStructure: true }
+    if (/^group_by\s*\(/.test(trimmed)) return { type: 'group', producesNestedArray: true }
+    if (/^(sort_by|unique_by)\s*\(/.test(trimmed)) return { type: 'sort', preservesArray: true }
+    // `..`(재귀 하강)은 필드 접근이 아니다
+    if (/^\.(?!\.)/.test(trimmed)) return { type: 'field', accessesField: true }
+    return { type: 'unknown' }
   }
 }

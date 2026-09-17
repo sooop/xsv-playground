@@ -4,6 +4,7 @@
    *
    * 항목은 세 갈래다: 등록된 단축키 액션 / 저장된 쿼리 / 최근 쿼리.
    */
+  import Modal from '../../../lib/ui/Modal.svelte'
   import { getQueryHistory, getSavedQueries } from '../data/storage'
   import { fuzzyScore } from '../util/fuzzy'
   import type { KeymapEntry } from '../utils/keymap'
@@ -110,16 +111,11 @@
       e.preventDefault()
       const item = ordered[cursor]
       if (item) pick(item)
-    } else if (e.key === 'Escape') {
-      e.preventDefault()
-      e.stopPropagation()
-      onClose()
     }
   }
 
   $effect(() => {
     void load()
-    inputEl?.focus()
   })
 
   // 목록이 바뀌면 커서를 맨 위로
@@ -129,86 +125,71 @@
   })
 </script>
 
-<div
-  class="overlay"
-  role="presentation"
-  onclick={(e) => {
-    if (e.target === e.currentTarget) onClose()
-  }}
+<Modal
+  label="커맨드 팰릿"
+  width="620px"
+  maxHeight="66vh"
+  plainBody
+  initialFocus={() => inputEl}
+  {onClose}
 >
-  <div class="palette pop" role="dialog" aria-modal="true" aria-label="커맨드 팰릿">
-    <div class="search">
-      <input
-        bind:this={inputEl}
-        class="field"
-        type="text"
-        placeholder="명령 또는 쿼리 검색..."
-        bind:value={term}
-        onkeydown={onKeydown}
-      />
-    </div>
-
-    <div class="results" role="listbox" aria-label="검색 결과">
-      {#if ordered.length === 0}
-        <p class="empty">결과가 없습니다</p>
-      {:else}
-        {#each SECTIONS as s (s.kind)}
-          {@const list = filtered.filter((i) => i.kind === s.kind)}
-          {#if list.length > 0}
-            <div class="sec label">{s.label}</div>
-            {#each list as item (item.id)}
-              {@const idx = ordered.indexOf(item)}
-              <div
-                class="item"
-                class:sel={idx === cursor}
-                role="option"
-                aria-selected={idx === cursor}
-                tabindex="-1"
-                onmousedown={(e) => {
-                  e.preventDefault()
-                  pick(item)
-                }}
-                onmouseenter={() => (cursor = idx)}
-              >
-                <span class="body">
-                  <span class="lbl">{item.label}</span>
-                  {#if item.description}
-                    <span class="desc">{item.description.slice(0, 80)}</span>
-                  {/if}
-                </span>
-                {#if item.badge}<span class="kbd">{item.badge}</span>{/if}
-              </div>
-            {/each}
-          {/if}
-        {/each}
-      {/if}
-    </div>
-
-    <div class="foot">
-      <span><span class="kbd">↑↓</span> 이동</span>
-      <span><span class="kbd">Enter</span> 실행</span>
-      <span><span class="kbd">Esc</span> 닫기</span>
-    </div>
+  <div class="search">
+    <input
+      bind:this={inputEl}
+      class="field"
+      type="text"
+      placeholder="명령 또는 쿼리 검색..."
+      bind:value={term}
+      onkeydown={onKeydown}
+    />
   </div>
-</div>
+
+  <div class="results" role="listbox" aria-label="검색 결과">
+    {#if ordered.length === 0}
+      <p class="empty">결과가 없습니다</p>
+    {:else}
+      {#each SECTIONS as s (s.kind)}
+        {@const list = filtered.filter((i) => i.kind === s.kind)}
+        {#if list.length > 0}
+          <div class="sec label">{s.label}</div>
+          {#each list as item (item.id)}
+            {@const idx = ordered.indexOf(item)}
+            <div
+              class="item"
+              class:sel={idx === cursor}
+              role="option"
+              aria-selected={idx === cursor}
+              tabindex="-1"
+              onmousedown={(e) => {
+                e.preventDefault()
+                pick(item)
+              }}
+              onmouseenter={() => (cursor = idx)}
+            >
+              <span class="body">
+                <span class="lbl">{item.label}</span>
+                {#if item.description}
+                  <span class="desc">{item.description.slice(0, 80)}</span>
+                {/if}
+              </span>
+              {#if item.badge}<span class="kbd">{item.badge}</span>{/if}
+            </div>
+          {/each}
+        {/if}
+      {/each}
+    {/if}
+  </div>
+
+  <div class="foot">
+    <span><span class="kbd">↑↓</span> 이동</span>
+    <span><span class="kbd">Enter</span> 실행</span>
+    <span><span class="kbd">Esc</span> 닫기</span>
+  </div>
+</Modal>
 
 <style>
-  .overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 220;
-    display: grid;
-    place-items: start center;
-    padding-top: 12vh;
-    background: var(--bg-overlay);
-  }
-  .palette {
-    display: flex;
-    flex-direction: column;
-    width: min(620px, 94vw);
-    max-height: 66vh;
-  }
   .search {
+    flex: none;
     padding: 8px;
     border-bottom: 1px solid var(--border-soft);
   }
@@ -217,6 +198,8 @@
     height: 32px;
   }
   .results {
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
     padding: 4px;
   }
@@ -266,6 +249,7 @@
     text-overflow: ellipsis;
   }
   .foot {
+    flex: none;
     display: flex;
     gap: 14px;
     padding: 6px 10px;

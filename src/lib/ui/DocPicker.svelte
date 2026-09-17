@@ -1,6 +1,7 @@
 <script lang="ts">
   import { DOC_SCHEMA_V, type DocMeta } from '../data/docSnapshot'
   import { ago, bytes, num } from '../util/format'
+  import Modal from './Modal.svelte'
 
   interface Props {
     docs: DocMeta[]
@@ -15,10 +16,6 @@
   let search = $state('')
   let searchEl = $state<HTMLInputElement | null>(null)
   let cursor = $state(0)
-
-  $effect(() => {
-    requestAnimationFrame(() => searchEl?.focus())
-  })
 
   const filtered = $derived.by(() => {
     const q = search.trim().toLowerCase()
@@ -38,13 +35,7 @@
     onOpen(d.id)
   }
 
-  function onKeyDown(e: KeyboardEvent): void {
-    e.stopPropagation()
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      onClose()
-      return
-    }
+  function onKeydown(e: KeyboardEvent): void {
     // 검색 입력 안에서는 위/아래·삭제만 가로채고, 나머지 문자 입력은 그대로 흘려보낸다
     if (e.key === 'ArrowDown') {
       e.preventDefault()
@@ -63,22 +54,15 @@
   }
 </script>
 
-<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-<div class="scrim" role="presentation" onclick={onClose}></div>
-
-<div
-  class="dlg pop"
-  role="dialog"
-  aria-modal="true"
-  aria-label="저장된 문서"
-  tabindex="-1"
-  onkeydown={onKeyDown}
+<Modal
+  label="저장된 문서"
+  title="저장된 문서"
+  width="440px"
+  initialFocus={() => searchEl}
+  plainBody
+  {onClose}
+  onKeydown={onKeydown}
 >
-  <header>
-    <h2>저장된 문서</h2>
-    <button class="btn icon" onclick={onClose} aria-label="닫기">✕</button>
-  </header>
-
   <div class="search">
     <input
       bind:this={searchEl}
@@ -133,59 +117,13 @@
     {/each}
   </div>
 
-  <footer>
+  {#snippet footer()}
     <span class="sum">{num(docs.length)}개 문서 · 합계 {bytes(totalBytes)}</span>
     <button class="btn" onclick={onClose}>닫기</button>
-  </footer>
-</div>
+  {/snippet}
+</Modal>
 
 <style>
-  .scrim {
-    position: fixed;
-    inset: 0;
-    background: var(--bg-overlay);
-    z-index: 70;
-    animation: fade 140ms var(--ease);
-  }
-  @keyframes fade {
-    from {
-      opacity: 0;
-    }
-  }
-
-  .dlg {
-    position: fixed;
-    z-index: 71;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: min(440px, calc(100vw - 32px));
-    max-height: calc(100vh - 48px);
-    display: flex;
-    flex-direction: column;
-    animation: rise 180ms var(--ease);
-  }
-  @keyframes rise {
-    from {
-      opacity: 0;
-      transform: translate(-50%, calc(-50% + 8px));
-    }
-  }
-
-  header {
-    display: flex;
-    align-items: center;
-    padding: 11px 8px 11px 14px;
-    border-bottom: 1px solid var(--border);
-  }
-  h2 {
-    flex: 1;
-    margin: 0;
-    font-size: 12.5px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-  }
-
   .search {
     padding: 10px 14px 6px;
   }
@@ -290,15 +228,6 @@
     font-size: 11.5px;
   }
 
-  footer {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 10px 12px;
-    border-top: 1px solid var(--border);
-    background: var(--bg-header);
-    border-radius: 0 0 8px 8px;
-  }
   .sum {
     flex: 1;
     color: var(--text-faint);

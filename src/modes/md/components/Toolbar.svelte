@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { dismissable } from '../../../lib/ui/dismiss'
   import { shell } from '../../../shell/shell.svelte'
   import { mdState } from '../mdState.svelte'
 
@@ -11,9 +12,22 @@
   let showTypo = $state(false)
   let titleDraft = $state('')
   let titleTimer: ReturnType<typeof setTimeout> | undefined
+  let typoToggleBtn = $state<HTMLButtonElement | null>(null)
+  let typoFirstBtn = $state<HTMLButtonElement | null>(null)
 
   $effect(() => {
     titleDraft = mdState.currentDoc?.name ?? ''
+  })
+
+  function closeTypo(): void {
+    showTypo = false
+  }
+
+  // 열릴 때 팝오버 첫 버튼으로 포커스를 옮긴다
+  $effect(() => {
+    if (!showTypo) return
+    const raf = requestAnimationFrame(() => typoFirstBtn?.focus())
+    return () => cancelAnimationFrame(raf)
   })
 
   const widthPresets = ['640px', '720px', '900px', '100%']
@@ -192,6 +206,7 @@
 
   <div class="typo-wrap">
     <button
+      bind:this={typoToggleBtn}
       class="btn icon"
       class:on={showTypo}
       onclick={() => (showTypo = !showTypo)}
@@ -207,10 +222,21 @@
       </svg>
     </button>
     {#if showTypo}
-      <div class="typo-popover pop" onmouseleave={() => (showTypo = false)} role="presentation">
+      <div
+        class="typo-popover pop"
+        role="dialog"
+        aria-label="본문 폭·글자 크기"
+        {@attach dismissable(closeTypo, { ignore: () => [typoToggleBtn] })}
+      >
         <div class="typo-row">
           <span>폭</span>
-          <button class="typo-btn" onclick={() => changeWidth(-1)} disabled={curWidthIdx <= 0} aria-label="폭 좁게">
+          <button
+            bind:this={typoFirstBtn}
+            class="typo-btn"
+            onclick={() => changeWidth(-1)}
+            disabled={curWidthIdx <= 0}
+            aria-label="폭 좁게"
+          >
             −
           </button>
           <span class="typo-val">{mdState.typography.width}</span>
@@ -279,7 +305,7 @@
     position: absolute;
     right: 0;
     top: calc(100% + 4px);
-    z-index: 60;
+    z-index: var(--z-popover);
     min-width: 176px;
     padding: 10px;
   }

@@ -3,6 +3,7 @@
   import { planJoin, type JoinSpec } from '../data/transform'
   import { num } from '../util/format'
   import { load, save } from '../util/storage'
+  import Modal from './Modal.svelte'
 
   export interface JoinResult {
     spec: JoinSpec
@@ -29,8 +30,8 @@
   let name = $state('')
 
   let sepEl = $state<HTMLInputElement | null>(null)
+  // 초기 포커스는 Modal이 준다 — 여기서는 기존 값을 선택 상태로만 만든다
   $effect(() => {
-    sepEl?.focus()
     sepEl?.select()
   })
 
@@ -57,12 +58,8 @@
     onApply({ spec, name: name.trim(), removeSources })
   }
 
-  function onKeyDown(e: KeyboardEvent): void {
-    e.stopPropagation()
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      onClose()
-    } else if (e.key === 'Enter' && !e.isComposing) {
+  function onKeydown(e: KeyboardEvent): void {
+    if (e.key === 'Enter' && !e.isComposing) {
       e.preventDefault()
       apply()
     }
@@ -79,17 +76,7 @@
   ]
 </script>
 
-<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-<div class="scrim" onclick={onClose}></div>
-
-<div class="dlg pop" role="dialog" aria-modal="true" aria-label="열 결합" tabindex="-1"
-  onkeydown={onKeyDown}>
-  <header>
-    <h2>열 결합</h2>
-    <button class="btn icon" onclick={onClose} aria-label="닫기">✕</button>
-  </header>
-
-  <div class="body">
+<Modal label="열 결합" title="열 결합" width="460px" initialFocus={() => sepEl} {onClose} onKeydown={onKeydown}>
     <div class="sources">
       <span class="label">결합할 열 ({num(cols.length)})</span>
       <div class="chips">
@@ -138,7 +125,7 @@
         빈 값 건너뛰기
       </button>
       <button class="tog" class:on={trim} onclick={() => (trim = !trim)}>앞뒤 공백 제거</button>
-      <button class="tog danger" class:on={removeSources}
+      <button class="btn danger" class:primary={removeSources}
         onclick={() => (removeSources = !removeSources)}>원본 열 삭제</button
       >
     </div>
@@ -154,65 +141,14 @@
     </div>
 
     <p class="scope-note">모든 행에 적용됩니다 (필터·숨김과 무관).</p>
-  </div>
 
-  <footer>
+  {#snippet footer()}
     <button class="btn" onclick={onClose}>취소</button>
     <button class="btn primary" disabled={!valid} onclick={apply}>결합</button>
-  </footer>
-</div>
+  {/snippet}
+</Modal>
 
 <style>
-  .scrim {
-    position: fixed;
-    inset: 0;
-    background: var(--bg-overlay);
-    z-index: 70;
-    animation: fade 140ms var(--ease);
-  }
-  @keyframes fade {
-    from {
-      opacity: 0;
-    }
-  }
-
-  .dlg {
-    position: fixed;
-    z-index: 71;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: min(460px, calc(100vw - 32px));
-    max-height: calc(100vh - 48px);
-    display: flex;
-    flex-direction: column;
-    animation: rise 180ms var(--ease);
-  }
-  @keyframes rise {
-    from {
-      opacity: 0;
-      transform: translate(-50%, calc(-50% + 8px));
-    }
-  }
-
-  header {
-    display: flex;
-    align-items: center;
-    padding: 11px 8px 11px 14px;
-    border-bottom: 1px solid var(--border);
-  }
-  h2 {
-    flex: 1;
-    margin: 0;
-    font-size: 12.5px;
-    font-weight: 600;
-  }
-
-  .body {
-    padding: 12px 14px;
-    overflow-y: auto;
-  }
-
   .label {
     display: block;
     margin-bottom: 4px;
@@ -307,14 +243,10 @@
     border-color: var(--border-strong);
   }
   .tog.on {
-    background: var(--sel);
-    border-color: var(--sel);
-    color: #fff;
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-text);
     font-weight: 600;
-  }
-  .tog.danger.on {
-    background: var(--danger);
-    border-color: var(--danger);
   }
 
   .preview {
@@ -344,15 +276,5 @@
     margin: 10px 0 0;
     color: var(--text-faint);
     font-size: 10px;
-  }
-
-  footer {
-    display: flex;
-    justify-content: flex-end;
-    gap: 6px;
-    padding: 10px 12px;
-    border-top: 1px solid var(--border);
-    background: var(--bg-header);
-    border-radius: 0 0 8px 8px;
   }
 </style>

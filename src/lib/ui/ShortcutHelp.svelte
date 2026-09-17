@@ -1,4 +1,6 @@
 <script lang="ts">
+  import Modal from './Modal.svelte'
+
   interface Props {
     onClose: () => void
   }
@@ -139,15 +141,7 @@
   ]
 </script>
 
-<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-<div class="scrim" onclick={onClose}></div>
-
-<div class="dlg pop" role="dialog" aria-modal="true" aria-label="단축키">
-  <header>
-    <h2>단축키</h2>
-    <button class="btn icon" onclick={onClose} aria-label="닫기">✕</button>
-  </header>
-
+<Modal label="단축키" title="단축키" width="720px" initialFocus="panel" plainBody {onClose}>
   <div class="cols">
     {#each groups as g (g.title)}
       <section>
@@ -169,59 +163,14 @@
     {/each}
   </div>
 
-  <footer>
+  {#snippet footer()}
     <span class="label">모든 데이터는 브라우저 안에서만 처리됩니다</span>
     <span class="grow"></span>
     <span class="label"><span class="kbd">?</span> 로 다시 열기</span>
-  </footer>
-</div>
+  {/snippet}
+</Modal>
 
 <style>
-  .scrim {
-    position: fixed;
-    inset: 0;
-    background: var(--bg-overlay);
-    z-index: 70;
-    animation: fade 140ms var(--ease);
-  }
-  @keyframes fade {
-    from {
-      opacity: 0;
-    }
-  }
-
-  .dlg {
-    position: fixed;
-    z-index: 71;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: min(720px, calc(100vw - 32px));
-    max-height: calc(100vh - 48px);
-    display: flex;
-    flex-direction: column;
-    animation: rise 180ms var(--ease);
-  }
-  @keyframes rise {
-    from {
-      opacity: 0;
-      transform: translate(-50%, calc(-50% + 8px));
-    }
-  }
-
-  header {
-    display: flex;
-    align-items: center;
-    padding: 11px 8px 11px 14px;
-    border-bottom: 1px solid var(--border);
-  }
-  h2 {
-    flex: 1;
-    margin: 0;
-    font-size: 12.5px;
-    font-weight: 600;
-  }
-
   .cols {
     columns: 2;
     column-gap: 26px;
@@ -256,14 +205,6 @@
     font-size: 11.5px;
   }
 
-  footer {
-    display: flex;
-    align-items: center;
-    padding: 9px 14px;
-    border-top: 1px solid var(--border);
-    background: var(--bg-header);
-    border-radius: 0 0 8px 8px;
-  }
   .grow {
     flex: 1;
   }

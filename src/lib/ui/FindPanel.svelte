@@ -6,6 +6,7 @@
   import type { View } from '../data/view.svelte'
   import { debounce } from '../util/debounce'
   import { num } from '../util/format'
+  import { dismissable } from './dismiss'
 
   interface Props {
     ds: Dataset
@@ -70,14 +71,9 @@
   }
 
   function onKeyDown(e: KeyboardEvent): void {
-    // 패널 안의 키는 그리드 전역 단축키로 새지 않게 한다
+    // 패널 안의 키는 그리드 전역 단축키로 새지 않게 한다. Escape는 dismissable이 처리한다.
     e.stopPropagation()
 
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      onClose()
-      return
-    }
     if (e.key === 'Enter' || e.key === 'F3') {
       e.preventDefault()
       step(e.shiftKey ? -1 : 1)
@@ -130,7 +126,14 @@
   const active = $derived(find.query !== '')
 </script>
 
-<div class="panel pop" role="dialog" aria-label="찾기" tabindex="-1" onkeydown={onKeyDown}>
+<div
+  class="panel pop"
+  role="dialog"
+  aria-label="찾기"
+  tabindex="-1"
+  onkeydown={onKeyDown}
+  {@attach dismissable(onClose, { outside: false })}
+>
   <div class="bar">
     <div class="field-wrap" class:error={!!find.error}>
       <span class="lens" aria-hidden="true">
@@ -275,7 +278,7 @@
     position: absolute;
     top: 8px;
     right: 14px;
-    z-index: 55;
+    z-index: var(--z-popover);
     width: min(460px, calc(100vw - 28px));
     display: flex;
     flex-direction: column;

@@ -79,7 +79,7 @@
 <style>
   .ac-list {
     position: fixed;
-    z-index: 3000;
+    z-index: var(--z-popover);
     width: 320px;
     overflow-y: auto;
     padding: 3px;

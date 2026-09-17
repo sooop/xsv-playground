@@ -98,30 +98,6 @@
     return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable
   }
 
-  function closeTopModal(): boolean {
-    if (showPalette) {
-      showPalette = false
-      return true
-    }
-    if (showHelp) {
-      showHelp = false
-      return true
-    }
-    if (showSnippets) {
-      showSnippets = false
-      return true
-    }
-    if (showCheatsheet) {
-      showCheatsheet = false
-      return true
-    }
-    if (showTransform) {
-      transform?.close()
-      return true
-    }
-    return false
-  }
-
   function closeAllPopups(): void {
     menu = null
     input?.closePopups()
@@ -160,16 +136,8 @@
   }
 
   export function handleKeydown(e: KeyboardEvent): boolean {
-    // 모달이 떠 있으면 Esc 만 가로챈다(입력은 그대로 통과시켜야 한다)
-    if (anyModal) {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        e.stopPropagation()
-        closeTopModal()
-        return true
-      }
-      return false
-    }
+    // 모달이 떠 있으면 keymap을 넘기지 않는다 — Escape는 셸이 modals.closeTop()으로 이미 처리했다
+    if (anyModal) return false
 
     if (keymap.dispatch(e)) return true
 

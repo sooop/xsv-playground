@@ -27,7 +27,7 @@
     left: 50%;
     bottom: calc(var(--status-h) + 14px);
     transform: translateX(-50%);
-    z-index: 80;
+    z-index: var(--z-toast);
     display: flex;
     flex-direction: column;
     align-items: center;

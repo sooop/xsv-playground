@@ -167,7 +167,7 @@
   .dlg-scrim {
     position: fixed;
     inset: 0;
-    z-index: 2000;
+    z-index: var(--z-system-dialog, 2000);
     background: var(--bg-overlay, rgba(10, 10, 12, 0.62));
     animation: dlg-fade 130ms ease-out;
   }
@@ -179,7 +179,7 @@
 
   .dlg-panel {
     position: fixed;
-    z-index: 2001;
+    z-index: calc(var(--z-system-dialog, 2000) + 1);
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
@@ -189,7 +189,7 @@
     color: var(--text, #16181c);
     border: 1px solid var(--border-strong, #c9ccd2);
     border-top: 2px solid var(--dlg-accent);
-    border-radius: 10px;
+    border-radius: 8px;
     box-shadow: var(--shadow-pop, 0 12px 40px -8px rgba(0, 0, 0, 0.35));
     font-family: inherit;
     animation: dlg-rise 160ms cubic-bezier(0.32, 0.72, 0, 1);

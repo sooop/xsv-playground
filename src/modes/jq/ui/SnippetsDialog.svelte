@@ -3,6 +3,7 @@
    * 쿼리 스니펫. 고르면 쿼리를 통째로 바꾸고 `"qsp"` 자리표시자를 선택 상태로 둔다
    * (바로 타이핑하면 패턴이 교체된다).
    */
+  import Modal from '../../../lib/ui/Modal.svelte'
   import { CATEGORY_LABEL, CATEGORY_ORDER, SNIPPETS, type Snippet } from '../data/snippets'
 
   interface Props {
@@ -22,70 +23,24 @@
   }
 </script>
 
-<div
-  class="overlay"
-  role="presentation"
-  onclick={(e) => {
-    if (e.target === e.currentTarget) onClose()
-  }}
->
-  <div class="modal pop" role="dialog" aria-modal="true" aria-label="쿼리 스니펫">
-    <header class="head">
-      <h2>스니펫</h2>
-      <button class="btn icon" onclick={onClose} title="닫기 (Esc)">×</button>
-    </header>
-
-    <div class="body">
-      {#each groups as g (g.category)}
-        <section>
-          <h3 class="label">{g.label}</h3>
-          <div class="grid">
-            {#each g.items as s (s.id)}
-              <button class="card" onclick={() => pick(s)}>
-                <span class="title">{s.title}</span>
-                <span class="desc">{s.desc}</span>
-                <pre class="code">{s.query}</pre>
-              </button>
-            {/each}
-          </div>
-        </section>
-      {/each}
-    </div>
-  </div>
-</div>
+<Modal label="쿼리 스니펫" title="스니펫" width="940px" maxHeight="88vh" {onClose}>
+  {#each groups as g (g.category)}
+    <section>
+      <h3 class="label">{g.label}</h3>
+      <div class="grid">
+        {#each g.items as s (s.id)}
+          <button class="card" onclick={() => pick(s)}>
+            <span class="title">{s.title}</span>
+            <span class="desc">{s.desc}</span>
+            <pre class="code">{s.query}</pre>
+          </button>
+        {/each}
+      </div>
+    </section>
+  {/each}
+</Modal>
 
 <style>
-  .overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 200;
-    display: grid;
-    place-items: center;
-    padding: 20px;
-    background: var(--bg-overlay);
-  }
-  .modal {
-    display: flex;
-    flex-direction: column;
-    width: min(940px, 96vw);
-    max-height: 88vh;
-  }
-  .head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 9px 12px;
-    border-bottom: 1px solid var(--border-soft);
-  }
-  h2 {
-    margin: 0;
-    font-size: 13px;
-    font-weight: 600;
-  }
-  .body {
-    overflow-y: auto;
-    padding: 10px 12px 14px;
-  }
   h3 {
     margin: 12px 0 6px;
   }

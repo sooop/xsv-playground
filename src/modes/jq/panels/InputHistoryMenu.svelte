@@ -4,6 +4,7 @@
    * 정렬 선택은 `xsv.jq.inputSort` 에 남는다.
    */
   import { dialogs } from '../../../lib/ui/dialog/dialog.svelte'
+  import { dismissable } from '../../../lib/ui/dismiss'
   import { load, save } from '../../../lib/util/storage'
   import {
     clearAllInputHistory,
@@ -17,8 +18,10 @@
   interface Props {
     onPick: (entry: InputHistoryEntry) => void
     onClose: () => void
+    /** 바깥 클릭 판정에서 제외할 앵커 버튼(다시 눌러 토글할 때 닫기·열기가 겹치지 않도록) */
+    anchor?: HTMLElement | null
   }
-  let { onPick, onClose }: Props = $props()
+  let { onPick, onClose, anchor }: Props = $props()
 
   let items = $state.raw<InputHistoryEntry[]>([])
   let term = $state('')
@@ -77,7 +80,7 @@
   })
 </script>
 
-<div class="menu pop">
+<div class="menu pop" {@attach dismissable(onClose, { ignore: () => [anchor] })}>
   <div class="menu-head">
     <input
       bind:this={searchEl}
@@ -91,6 +94,7 @@
       {sortBy === 'timestamp' ? '등록순' : '사용순'}
     </button>
     <button class="btn outline" onclick={clearAll}>모두 삭제</button>
+    <button class="btn icon" onclick={onClose} title="닫기">×</button>
   </div>
 
   <div class="menu-list">
@@ -118,7 +122,7 @@
     position: absolute;
     top: calc(100% + 4px);
     right: 0;
-    z-index: 60;
+    z-index: var(--z-popover);
     width: min(560px, 90vw);
     display: flex;
     flex-direction: column;

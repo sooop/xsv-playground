@@ -31,7 +31,7 @@
 <style>
   .ac-doc {
     position: fixed;
-    z-index: 3000;
+    z-index: var(--z-popover);
     width: 280px;
     overflow-y: auto;
     padding: 8px 10px;

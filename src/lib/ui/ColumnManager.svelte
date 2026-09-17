@@ -2,6 +2,7 @@
   import type { Dataset } from '../data/dataset.svelte'
   import type { View } from '../data/view.svelte'
   import { num } from '../util/format'
+  import { dismissable } from './dismiss'
 
   interface Props {
     ds: Dataset
@@ -15,7 +16,6 @@
 
   let search = $state('')
   let searchEl = $state<HTMLInputElement | null>(null)
-  let panelEl = $state<HTMLDivElement | null>(null)
 
   $effect(() => {
     requestAnimationFrame(() => searchEl?.focus())
@@ -98,38 +98,16 @@
     return { left, top }
   })
 
-  function onKeyDown(e: KeyboardEvent): void {
-    e.stopPropagation()
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      onClose()
-    }
-  }
-
-  $effect(() => {
-    const onDown = (e: PointerEvent) => {
-      if (panelEl && !panelEl.contains(e.target as Node) && !anchor.contains(e.target as Node)) {
-        onClose()
-      }
-    }
-    const id = setTimeout(() => window.addEventListener('pointerdown', onDown, true), 0)
-    return () => {
-      clearTimeout(id)
-      window.removeEventListener('pointerdown', onDown, true)
-    }
-  })
-
   const typeGlyph: Record<string, string> = { number: '#', date: '◷', string: 'T' }
 </script>
 
 <div
   class="panel pop"
-  bind:this={panelEl}
   style="left:{pos.left}px;top:{pos.top}px"
   role="dialog"
   aria-label="열 관리"
   tabindex="-1"
-  onkeydown={onKeyDown}
+  {@attach dismissable(onClose, { ignore: () => [anchor] })}
 >
   <header>
     <span class="title">열 관리</span>
@@ -181,7 +159,7 @@
 <style>
   .panel {
     position: fixed;
-    z-index: 60;
+    z-index: var(--z-popover);
     width: 288px;
     max-height: 420px;
     display: flex;
