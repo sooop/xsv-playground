@@ -107,6 +107,11 @@
   })
 </script>
 
+<!-- 탭 제목은 활성 모드와 그 문서를 따른다(조립은 shell.docTitle) -->
+<svelte:head>
+  <title>{shell.docTitle}</title>
+</svelte:head>
+
 <svelte:window
   ondragover={onWindowDragOver}
   ondragleave={() => (dragDepth = 0)}

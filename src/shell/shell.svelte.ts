@@ -8,6 +8,9 @@ import { dialogs } from '../lib/ui/dialog/dialog.svelte'
 import { sniffFile } from './fileKind'
 import { MODE_LABEL, emptyStatus, type ModeHandle, type ModeId, type ModePayload, type ModeStatus } from './mode'
 
+/** 브라우저 탭 제목의 꼬리표. index.html의 정적 `<title>`과 맞춰 둔다. */
+export const APP_NAME = 'Workbench'
+
 class ShellController {
   active = $state<ModeId>('csv')
 
@@ -22,6 +25,16 @@ class ShellController {
     jq: emptyStatus(),
     md: emptyStatus(),
   })
+
+  /**
+   * 브라우저 탭 제목 — `문서명 · 모드 · Workbench` 형태로, 문서가 없으면 `모드 · Workbench`.
+   * 저장되지 않은 변경은 앞에 `●`로 표시한다. DOM 반영은 App이 한다.
+   */
+  get docTitle(): string {
+    const st = this.status[this.active]
+    const parts = st.label ? [st.label, MODE_LABEL[this.active]] : [MODE_LABEL[this.active]]
+    return `${st.isDirty ? '● ' : ''}${[...parts, APP_NAME].join(' · ')}`
+  }
 
   handles: Partial<Record<ModeId, ModeHandle>> = {}
 
