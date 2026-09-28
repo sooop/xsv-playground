@@ -8,6 +8,7 @@
   import { dismissable } from '../../../lib/ui/dismiss'
   import { filterEntries, scanJson, type JsonEntry } from '../utils/json-position-scanner'
   import { decodeStringified } from '../utils/stringified-fields'
+  import { getTextOffsetTop } from '../autocomplete/caret'
   import { load, save } from '../../../lib/util/storage'
 
   interface Props {
@@ -95,10 +96,10 @@
     const start = hasKey ? e.keyStart : e.valueStart
     const end = hasKey ? e.keyEnd : e.valueEnd
     const lineHeight = parseFloat(getComputedStyle(textarea).lineHeight) || 18
-    const lineNum = textarea.value.substring(0, start).split('\n').length - 1
+    const top = getTextOffsetTop(textarea, start)
     textarea.focus()
     textarea.setSelectionRange(start, end)
-    textarea.scrollTop = Math.max(0, lineNum * lineHeight - textarea.clientHeight / 2)
+    textarea.scrollTop = Math.max(0, top + lineHeight / 2 - textarea.clientHeight / 2)
     activeIdx = i
   }
 

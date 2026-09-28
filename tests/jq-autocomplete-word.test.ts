@@ -5,6 +5,7 @@ import {
   filterAndSortKeys,
   getCurrentWord,
   getFieldAccessContext,
+  toJqFieldPath,
   truncatePath,
   type AcItem,
 } from '../src/modes/jq/autocomplete/word'
@@ -130,6 +131,63 @@ describe('applyItem', () => {
   it('필드 후보에는 괄호를 붙이지 않는다', () => {
     const item: AcItem = { name: 'map', desc: '', inputType: 'field' }
     expect(applyItem('.ma', item, 1, 3).text).toBe('.map')
+  })
+
+  it('하이픈이 든 필드 키는 앞의 점을 두고 bracket notation 으로 넣는다', () => {
+    const item: AcItem = { name: 'status-line', desc: '', inputType: 'field' }
+    const r = applyItem('.tipsHistory.', item, 13, 13)
+    expect(r.text).toBe('.tipsHistory.["status-line"]')
+    expect(r.cursor).toBe(r.text.length)
+  })
+
+  it('숫자로 시작하는 필드 키도 bracket notation 으로 넣는다', () => {
+    const item: AcItem = { name: '2fa', desc: '', inputType: 'field' }
+    const r = applyItem('.', item, 1, 1)
+    expect(r.text).toBe('.["2fa"]')
+  })
+
+  it('유효한 식별자 필드 키는 그대로 dot notation 을 쓴다', () => {
+    const item: AcItem = { name: 'status_line', desc: '', inputType: 'field' }
+    expect(applyItem('.', item, 1, 1).text).toBe('.status_line')
+  })
+
+  it('파이프 뒤 새 표현식의 identity dot 은 지우지 않는다', () => {
+    const item: AcItem = { name: 'status-line', desc: '', inputType: 'field' }
+    const r = applyItem('.a | .', item, 6, 6)
+    expect(r.text).toBe('.a | .["status-line"]')
+  })
+
+  it('여러 단계 후보는 세그먼트별로 감싼다 — 전부 bare 면 그대로', () => {
+    const f = (name: string): AcItem => ({ name, desc: '', inputType: 'field' })
+    expect(applyItem('.a.', f('b.c'), 3, 3).text).toBe('.a.b.c')
+    expect(applyItem('.', f('users[].name'), 1, 1).text).toBe('.users[].name')
+    expect(applyItem('.tipsHistory.', f('agent-flag.count'), 13, 13).text).toBe(
+      '.tipsHistory.["agent-flag"].count',
+    )
+    expect(applyItem('.', f('users[].user-id'), 1, 1).text).toBe('.users[].["user-id"]')
+    expect(applyItem('.', f('이름[].성'), 1, 1).text).toBe('.["이름"][].["성"]')
+  })
+
+  it('공백이 든 필드도 대괄호로 감싼다', () => {
+    const item: AcItem = { name: 'a b', desc: '', inputType: 'field' }
+    expect(applyItem('.a', item, 1, 2).text).toBe('.["a b"]')
+  })
+
+  it('따옴표가 든 필드는 이스케이프한다', () => {
+    const item: AcItem = { name: 'a"b', desc: '', inputType: 'field' }
+    expect(applyItem('.a', item, 1, 2).text).toBe('.["a\\"b"]')
+  })
+
+  it('앞에 점이 없는 자리(객체 축약형)에는 변환하지 않는다', () => {
+    const item: AcItem = { name: 'name', desc: '', inputType: 'field' }
+    expect(applyItem('{na', item, 1, 3).text).toBe('{name')
+  })
+})
+
+describe('toJqFieldPath', () => {
+  it('숫자로 시작하는 키·빈 키도 감싼다', () => {
+    expect(toJqFieldPath('2024.q1')).toBe('["2024"].q1')
+    expect(toJqFieldPath('')).toBe('[""]')
   })
 })
 

@@ -182,9 +182,37 @@ export function truncatePath(path: string, maxLen = 40): string {
   return '...' + path.slice(-(maxLen - 3))
 }
 
+/** jq 가 `.name` 그대로 받아들이는 식별자인지 — 아니면 대괄호 문자열로 감싸야 한다 */
+const BARE_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+function quoteKey(name: string): string {
+  return '"' + name.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"'
+}
+
+/**
+ * 필드 후보(`extractKeys` 의 `a.b[].c` 점 경로)를 jq 경로 문법으로 바꾼다.
+ * 세그먼트마다 bare 식별자면 그대로, 아니면 `["seg"]` 로 감싼다. 첫 세그먼트는 이미 입력된
+ * `.` 뒤에 붙으므로 점을 앞에 두지 않는다 — `.a.["b-c"]` 처럼 점 바로 뒤 대괄호도 유효한 jq 다.
+ * 한계: 점 경로 표기라 리터럴 키 `"a.b"` 와 중첩 `a → b` 를 구분할 수 없어 항상 중첩으로 본다.
+ */
+export function toJqFieldPath(name: string): string {
+  return name
+    .split('.')
+    .map((seg, i) => {
+      const m = /^(.*?)((?:\[\])*)$/.exec(seg)!
+      const base = m[1]!
+      const arr = m[2]!
+      const body = BARE_KEY_RE.test(base) ? base : '[' + quoteKey(base) + ']'
+      return (i === 0 ? '' : '.') + body + arr
+    })
+    .join('')
+}
+
 /**
  * 후보를 텍스트에 적용한 결과를 계산한다(순수).
  * 괄호가 필요한 함수는 `(` 를 덧붙이되, 바로 뒤가 이미 `(` 면 넣지 않는다.
+ * 필드 후보이고 바로 앞이 `.` 이면 {@link toJqFieldPath} 로 jq 경로 문법을 맞춘다
+ * (객체 축약형 `{ag` 처럼 앞에 점이 없는 자리에는 적용하지 않는다).
  */
 export function applyItem(
   text: string,
@@ -192,6 +220,13 @@ export function applyItem(
   start: number,
   end: number,
 ): { text: string; cursor: number } {
+  if (item.inputType === 'field' && text[start - 1] === '.') {
+    const insert = toJqFieldPath(item.name)
+    return {
+      text: text.substring(0, start) + insert + text.substring(end),
+      cursor: start + insert.length,
+    }
+  }
   const isFunctionWithArgs =
     item.inputType !== 'field' && item.inputType !== 'variable' && FUNCTIONS_WITH_ARGS.has(item.name)
   const insertParen = isFunctionWithArgs && text[end] !== '('

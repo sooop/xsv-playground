@@ -24,6 +24,7 @@ import {
   getCurrentWord,
   getFallbackContextQuery,
   getFieldAccessContext,
+  toJqFieldPath,
   type AcItem,
 } from './word'
 
@@ -496,14 +497,19 @@ export class AutocompleteEngine {
     this.#host.setQuery(next.text, next.cursor)
   }
 
-  /** Tab 순환 중의 즉시 교체 — 팝업은 열어 둔다 */
+  /**
+   * Tab 순환 중의 즉시 교체 — 팝업은 열어 둔다(함수는 괄호 없이 이름만 넣는다).
+   * 앞의 `.` 을 지우지 않으므로 교체 구간은 항상 `#tabWordStart..cursor` 로 고정된다.
+   */
   #applyInPlace(item: AcItem): void {
     const ta = this.#host.el()
     if (!ta) return
     const text = ta.value
     const cursor = ta.selectionStart
-    const nextText = text.substring(0, this.#tabWordStart) + item.name + text.substring(cursor)
-    this.#host.setQuery(nextText, this.#tabWordStart + item.name.length)
+    const start = this.#tabWordStart
+    const insert =
+      item.inputType === 'field' && text[start - 1] === '.' ? toJqFieldPath(item.name) : item.name
+    this.#host.setQuery(text.substring(0, start) + insert + text.substring(cursor), start + insert.length)
   }
 
   /**
@@ -551,6 +557,11 @@ export class AutocompleteEngine {
       return true
     }
     if (e.key === 'Enter' && this.selected >= 0) {
+      // Tab 순환 중이면 후보가 이미 들어가 있다 — 다시 넣으면 `["a-b"]` 뒤에 이름이 한 번 더 붙는다
+      if (this.#originalWord !== null) {
+        this.hide()
+        return true
+      }
       this.apply(this.items[this.selected]!)
       return true
     }
