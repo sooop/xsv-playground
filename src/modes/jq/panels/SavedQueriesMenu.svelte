@@ -151,13 +151,13 @@
 <style>
   .menu {
     position: absolute;
-    top: calc(100% + 4px);
+    top: calc(var(--header-h) + 4px);
     right: 0;
     z-index: var(--z-popover);
     width: min(520px, 90vw);
     display: flex;
     flex-direction: column;
-    max-height: 60vh;
+    max-height: min(60vh, calc(100% - var(--header-h) - 12px));
   }
   .menu-head {
     display: flex;

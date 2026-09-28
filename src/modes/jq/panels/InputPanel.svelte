@@ -339,10 +339,12 @@
     border: 1px solid var(--border);
     border-radius: 7px;
     overflow: hidden;
+    /* 헤더에 붙는 팝오버는 헤더가 아니라 패널을 기준으로 배치한다 — 패널이 overflow:hidden 이라
+       헤더 기준 max-height 는 패널 밖으로 삐져나가 잘린다 */
+    position: relative;
   }
 
   .panel-head {
-    position: relative;
     display: flex;
     align-items: center;
     justify-content: space-between;

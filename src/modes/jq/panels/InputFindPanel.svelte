@@ -4,9 +4,12 @@
    *
    * 2MB 를 넘으면 스캐너가 포기하므로(포지션 스캔이 O(n) 메모리다) 대신 같은 일을 하는
    * jq 쿼리를 쿼리 패널에 넣어 준다 — 원본 `InputPanel.ts:performFindSearch` 의 동작.
+   *
+   * 결과 목록은 행 높이가 고정인 가상 스크롤이다 — 스캐너가 최대 5000개까지 내므로 전부 DOM 에
+   * 올리지 않고 보이는 구간(+여유)만 그린다. 표시 개수 상한(예전 200)은 없다.
    */
   import { dismissable } from '../../../lib/ui/dismiss'
-  import { filterEntries, scanJson, type JsonEntry } from '../utils/json-position-scanner'
+  import { filterEntries, MAX_ENTRIES, scanJson, type JsonEntry } from '../utils/json-position-scanner'
   import { decodeStringified } from '../utils/stringified-fields'
   import { getTextOffsetTop } from '../autocomplete/caret'
   import { load, save } from '../../../lib/util/storage'
@@ -25,8 +28,12 @@
   }
   let { textarea, text, onClose, onInjectQuery, onUnstringify, anchor }: Props = $props()
 
-  const MAX_DISPLAY = 200
   const SCAN_LIMIT = 2 * 1024 * 1024
+  /** 입력이 바뀐 뒤 다시 스캔하기까지의 대기 — 포커스가 textarea 로 넘어간 채 타이핑해도 매 키마다 스캔하지 않게 */
+  const RESCAN_MS = 250
+  /** 행 높이(px). CSS `.row` 와 같아야 한다 */
+  const ROW_H = 26
+  const OVERSCAN = 6
 
   let term = $state('')
   let keys = $state(true)
@@ -37,8 +44,14 @@
   let debounce: ReturnType<typeof setTimeout> | null = null
   let applied = $state('')
   let injected = $state(false)
+  let listEl = $state<HTMLDivElement | null>(null)
+  let scrollTop = $state(0)
+  let viewH = $state(0)
 
   let entries = $state.raw<JsonEntry[]>([])
+  /** `entries` 를 만든 텍스트 — 재스캔 대기 중에 오래된 위치로 이동하지 않도록 비교한다 */
+  let scannedFor: string | null = null
+  let scanTimer: ReturnType<typeof setTimeout> | null = null
 
   const tooLarge = $derived(text.length > SCAN_LIMIT)
 
@@ -57,8 +70,12 @@
     return filterEntries(entries, applied, keys, values, regex)
   })
 
-  const shown = $derived(results.slice(0, MAX_DISPLAY))
-  const overflow = $derived(results.length > MAX_DISPLAY)
+  /** 스캐너가 항목 수 상한에서 멈췄는지 — 뒤쪽 항목은 검색되지 않는다 */
+  const scanCapped = $derived(entries.length >= MAX_ENTRIES)
+
+  const winStart = $derived(Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN))
+  const winEnd = $derived(Math.min(results.length, Math.ceil((scrollTop + viewH) / ROW_H) + OVERSCAN))
+  const windowed = $derived(results.slice(winStart, winEnd))
 
   function onInput(): void {
     if (debounce) clearTimeout(debounce)
@@ -90,8 +107,20 @@
     injected = true
   }
 
+  function flushScan(): void {
+    if (scanTimer) clearTimeout(scanTimer)
+    scanTimer = null
+    entries = tooLarge ? [] : scanJson(text)
+    scannedFor = text
+  }
+
   function goto(e: JsonEntry, i: number): void {
     if (!textarea) return
+    // 입력이 바뀐 직후라면 위치가 어긋나 있다 — 새로 스캔해 목록만 갱신하고 이동은 다음 클릭에 맡긴다
+    if (scannedFor !== text) {
+      flushScan()
+      return
+    }
     const hasKey = e.key !== null && e.keyStart < e.keyEnd
     const start = hasKey ? e.keyStart : e.valueStart
     const end = hasKey ? e.keyEnd : e.valueEnd
@@ -103,10 +132,23 @@
     activeIdx = i
   }
 
+  /** 행마다 JSON.parse 를 반복하지 않도록 항목 단위로 판정을 기억한다(항목이 새로 스캔되면 자연히 버려진다) */
+  const unstringCache = new WeakMap<JsonEntry, boolean>()
+
   /** 이 값이 문자열로 감싸인 JSON인지 — 맞으면 ↧ 버튼을 보여 준다 */
   function unstringifiable(e: JsonEntry): boolean {
+    const hit = unstringCache.get(e)
+    if (hit !== undefined) return hit
+    const ok = checkUnstringifiable(e)
+    unstringCache.set(e, ok)
+    return ok
+  }
+
+  function checkUnstringifiable(e: JsonEntry): boolean {
     const literal = text.slice(e.valueStart, e.valueEnd)
     if (!literal.startsWith('"')) return false
+    // 풀릴 문자열에는 `{` `[` `%` 중 하나가 반드시 있다 — 없으면 큰 문자열을 파싱하지 않는다
+    if (!/[{[%]/.test(literal)) return false
     try {
       const s: unknown = JSON.parse(literal)
       return typeof s === 'string' && decodeStringified(s) !== null
@@ -145,17 +187,58 @@
     textarea?.focus()
   }
 
+  /** 키보드로 옮긴 행이 보이도록 목록을 스크롤한다 */
+  function reveal(i: number): void {
+    if (!listEl) return
+    const top = i * ROW_H
+    const bottom = top + ROW_H + 8 // 위아래 padding 4px 씩
+    if (top < listEl.scrollTop) listEl.scrollTop = top
+    else if (bottom > listEl.scrollTop + listEl.clientHeight) listEl.scrollTop = bottom - listEl.clientHeight
+  }
+
   function onKeydown(e: KeyboardEvent): void {
     if (e.key === 'Enter') {
       e.preventDefault()
       if (tooLarge) injectBigQuery()
-      else if (shown[0]) goto(shown[0], 0)
+      else {
+        const i = activeIdx >= 0 ? activeIdx : 0
+        const target = results[i]
+        if (target) goto(target, i)
+      }
+    } else if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && results.length > 0) {
+      e.preventDefault()
+      const step = e.key === 'ArrowDown' ? 1 : -1
+      activeIdx = activeIdx < 0 ? (step === 1 ? 0 : results.length - 1) : (activeIdx + step + results.length) % results.length
+      reveal(activeIdx)
     }
   }
 
-  // 텍스트가 바뀌면 스캔 캐시를 버린다
+  // 텍스트가 바뀌면 스캔 캐시를 버린다. 첫 스캔은 즉시, 그 뒤로는 타이핑이 멎은 다음에 한다.
   $effect(() => {
-    entries = tooLarge ? [] : scanJson(text)
+    const t = text
+    if (tooLarge) {
+      entries = []
+      scannedFor = t
+      return
+    }
+    if (scannedFor === null) {
+      flushScan()
+      return
+    }
+    if (scanTimer) clearTimeout(scanTimer)
+    scanTimer = setTimeout(flushScan, RESCAN_MS)
+    return () => {
+      if (scanTimer) clearTimeout(scanTimer)
+      scanTimer = null
+    }
+  })
+
+  // 결과 집합이 바뀌면 맨 위부터 다시 본다
+  $effect(() => {
+    void results
+    activeIdx = -1
+    scrollTop = 0
+    if (listEl) listEl.scrollTop = 0
   })
 
   $effect(() => {
@@ -179,15 +262,13 @@
     <label class="chk"><input type="checkbox" bind:checked={values} /> 값</label>
     <button class="btn outline" class:on={regex} onclick={toggleRegex} title="정규식 사용">.*</button>
     <span class="count">
-      {#if tooLarge}2MB+{:else if regexError}정규식 오류{:else if applied.trim()}{overflow
-          ? MAX_DISPLAY + '+'
-          : results.length}개{/if}
+      {#if tooLarge}2MB+{:else if regexError}정규식 오류{:else if applied.trim()}{results.length.toLocaleString()}개{/if}
     </span>
     <button class="btn icon" onclick={onClose} title="닫기 (Esc)">×</button>
   </div>
 
-  <div class="find-list">
-    {#if tooLarge}
+  {#if tooLarge}
+    <div class="find-list">
       <p class="empty">
         입력이 2MB를 넘어 위치 스캔을 쓸 수 없습니다.
         {#if injected}
@@ -196,49 +277,63 @@
           검색어를 입력하고 Enter를 누르면 같은 일을 하는 jq 쿼리를 넣어 드립니다.
         {/if}
       </p>
-    {:else if regexError}
-      <p class="empty">정규식 오류: 올바른 패턴을 입력하세요</p>
-    {:else if !applied.trim()}
+    </div>
+  {:else if regexError}
+    <div class="find-list"><p class="empty">정규식 오류: 올바른 패턴을 입력하세요</p></div>
+  {:else if !applied.trim()}
+    <div class="find-list">
       <p class="empty">
         {entries.length > 0 ? `${entries.length}개 항목. 검색어를 입력하세요.` : 'JSON 항목이 없습니다'}
       </p>
-    {:else if shown.length === 0}
-      <p class="empty">일치하는 항목 없음</p>
-    {:else}
-      {#each shown as e, i (e.path + ':' + e.valueStart)}
-        <div class="row" class:active={i === activeIdx}>
-          <button class="row-main" onclick={() => goto(e, i)}>
-            <span class="path">
-              {#each segments(e.path) as s}{#if s.hit}<mark>{s.t}</mark>{:else}{s.t}{/if}{/each}
-            </span>
-            <span class="value">
-              {#each segments(e.value) as s}{#if s.hit}<mark>{s.t}</mark>{:else}{s.t}{/if}{/each}
-            </span>
-          </button>
-          {#if unstringifiable(e)}
-            <button class="btn icon" title="이 필드만 unstringify" onclick={() => onUnstringify(e.path)}>
-              ↧
-            </button>
-          {/if}
+    </div>
+  {:else if results.length === 0}
+    <div class="find-list"><p class="empty">일치하는 항목 없음</p></div>
+  {:else}
+    <div
+      bind:this={listEl}
+      bind:clientHeight={viewH}
+      class="find-list"
+      onscroll={(ev) => (scrollTop = ev.currentTarget.scrollTop)}
+    >
+      <div class="spacer" style:height="{results.length * ROW_H}px">
+        <div class="rows" style:top="{winStart * ROW_H}px">
+          {#each windowed as e, k (e.path + ':' + e.valueStart)}
+            {@const i = winStart + k}
+            <div class="row" class:active={i === activeIdx}>
+              <button class="row-main" onclick={() => goto(e, i)}>
+                <span class="path">
+                  {#each segments(e.path) as s}{#if s.hit}<mark>{s.t}</mark>{:else}{s.t}{/if}{/each}
+                </span>
+                <span class="value">
+                  {#each segments(e.value) as s}{#if s.hit}<mark>{s.t}</mark>{:else}{s.t}{/if}{/each}
+                </span>
+              </button>
+              {#if unstringifiable(e)}
+                <button class="btn icon" title="이 필드만 unstringify" onclick={() => onUnstringify(e.path)}>
+                  ↧
+                </button>
+              {/if}
+            </div>
+          {/each}
         </div>
-      {/each}
-      {#if overflow}
-        <p class="empty">결과가 200개로 제한되었습니다. 검색어를 구체화하세요.</p>
-      {/if}
+      </div>
+    </div>
+    {#if scanCapped}
+      <p class="note">항목이 {MAX_ENTRIES.toLocaleString()}개를 넘어 앞쪽 {MAX_ENTRIES.toLocaleString()}개만 검색합니다.</p>
     {/if}
-  </div>
+  {/if}
 </div>
 
 <style>
   .find {
     position: absolute;
-    top: calc(100% + 4px);
+    top: calc(var(--header-h) + 4px);
     right: 0;
     z-index: var(--z-popover);
     width: min(620px, 92vw);
     display: flex;
     flex-direction: column;
-    max-height: 60vh;
+    max-height: min(60vh, calc(100% - var(--header-h) - 12px));
   }
   .find-head {
     display: flex;
@@ -266,8 +361,26 @@
     color: var(--text-faint);
   }
   .find-list {
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
     padding: 4px;
+  }
+  .spacer {
+    position: relative;
+  }
+  .rows {
+    position: absolute;
+    left: 0;
+    right: 0;
+  }
+  .note {
+    flex: none;
+    margin: 0;
+    padding: 5px 10px;
+    border-top: 1px solid var(--border-soft);
+    font-size: var(--fs-label);
+    color: var(--text-faint);
   }
   .empty {
     margin: 0;
@@ -279,6 +392,8 @@
   .row {
     display: flex;
     align-items: center;
+    height: 26px; /* ROW_H 와 같아야 한다 */
+    box-sizing: border-box;
     border-radius: 5px;
   }
   .row:hover {
@@ -293,7 +408,9 @@
     display: grid;
     grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
     gap: 10px;
-    padding: 4px 7px;
+    align-items: center;
+    height: 100%;
+    padding: 0 7px;
     text-align: left;
     font-family: var(--font-mono);
     font-size: var(--fs-label);

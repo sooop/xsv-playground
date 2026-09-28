@@ -1,7 +1,10 @@
 export interface JsonEntry {
   path: string;
   key: string | null;
+  /** 목록에 보여 줄 값 — 길면 잘리고 문자열은 따옴표가 붙는다 */
   value: string;
+  /** 검색 대상 전체 값(따옴표·말줄임 없음). 표시용 `value` 는 60자에서 잘려 뒷부분이 검색되지 않는다. */
+  full: string;
   keyStart: number;
   keyEnd: number;
   valueStart: number;
@@ -10,8 +13,10 @@ export interface JsonEntry {
 
 const MAX_VALUE_DISPLAY = 60;
 const SIZE_LIMIT = 2 * 1024 * 1024; // 2MB
+/** 스캔이 멈추는 항목 수 — 이 수에 닿으면 뒤쪽 항목은 목록에 없다 */
+export const MAX_ENTRIES = 5000;
 
-export function scanJson(text: string, maxEntries = 5000): JsonEntry[] {
+export function scanJson(text: string, maxEntries = MAX_ENTRIES): JsonEntry[] {
   if (text.length > SIZE_LIMIT) return [];
 
   const entries: JsonEntry[] = [];
@@ -68,9 +73,9 @@ export function scanJson(text: string, maxEntries = 5000): JsonEntry[] {
     return null;
   }
 
-  function addEntry(path: string, key: string | null, keyStart: number, keyEnd: number, valueStart: number, valueEnd: number, rawValue: string): void {
+  function addEntry(path: string, key: string | null, keyStart: number, keyEnd: number, valueStart: number, valueEnd: number, rawValue: string, full: string = rawValue): void {
     const display = rawValue.length > MAX_VALUE_DISPLAY ? rawValue.slice(0, MAX_VALUE_DISPLAY) + '…' : rawValue;
-    entries.push({ path, key, value: display, keyStart, keyEnd, valueStart, valueEnd });
+    entries.push({ path, key, value: display, full, keyStart, keyEnd, valueStart, valueEnd });
   }
 
   function parseValue(path: string, key: string | null, keyStart: number, keyEnd: number): void {
@@ -80,7 +85,7 @@ export function scanJson(text: string, maxEntries = 5000): JsonEntry[] {
     const ch = text[pos];
     if (ch === '"') {
       const result = parseString();
-      if (result) addEntry(path, key, keyStart, keyEnd, result.start, result.end, `"${result.value}"`);
+      if (result) addEntry(path, key, keyStart, keyEnd, result.start, result.end, `"${result.value}"`, result.value);
     } else if (ch === '{') {
       const objStart = pos;
       if (key !== null) addEntry(path, key, keyStart, keyEnd, objStart, objStart + 1, '{…}');
@@ -172,14 +177,14 @@ export function filterEntries(
     }
     return entries.filter(e => {
       if (matchKeys && e.key && regex.test(e.key)) return true;
-      if (matchValues && regex.test(e.value)) return true;
+      if (matchValues && regex.test(e.full)) return true;
       return false;
     });
   }
   const q = query.toLowerCase();
   return entries.filter(e => {
     if (matchKeys && e.key && e.key.toLowerCase().includes(q)) return true;
-    if (matchValues && e.value.toLowerCase().includes(q)) return true;
+    if (matchValues && e.full.toLowerCase().includes(q)) return true;
     return false;
   });
 }
