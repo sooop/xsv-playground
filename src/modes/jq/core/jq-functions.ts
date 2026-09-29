@@ -24,7 +24,6 @@ export const JQ_FUNCTIONS: JqFunctionInfo[] = [
   { name: 'length', desc: 'Get length of value', inputType: 'any' },
   { name: 'keys', desc: 'Get object keys or array indices', inputType: 'array|object' },
   { name: 'keys_unsorted', desc: 'Get keys without sorting', inputType: 'array|object' },
-  { name: 'values', desc: 'Get all values', inputType: 'array|object' },
   { name: 'empty', desc: 'Return no results', inputType: 'any' },
   { name: 'null', desc: 'Null value', inputType: 'any' },
 
@@ -175,30 +174,14 @@ export const JQ_FUNCTIONS: JqFunctionInfo[] = [
   { name: 'utf8bytelength', desc: 'UTF-8 byte length', inputType: 'string' },
   { name: 'tojson', desc: 'Convert to JSON string', inputType: 'any', signature: 'tojson', example: '{"a":1} | tojson\n// → "{\"a\":1}"' },
   { name: 'fromjson', desc: 'Parse JSON string', inputType: 'string', signature: 'fromjson', example: '"{\"a\":1}" | fromjson\n// → {"a":1}' },
-  { name: 'splits', desc: 'Split stream', inputType: 'string' },
   { name: 'scan', desc: 'Scan for regex matches', inputType: 'string' },
   { name: 'combinations', desc: 'Get combinations', inputType: 'array' },
-  { name: 'until', desc: 'Until loop', inputType: 'any' },
-  { name: 'limit', desc: 'Limit output', inputType: 'any' },
-  { name: 'sql', desc: 'SQL-like operations', inputType: 'any' },
   { name: 'builtins', desc: 'List all builtin functions', inputType: 'any' },
 
   // Null/Boolean handling
-  { name: 'null', desc: 'Null value', inputType: 'any' },
   { name: 'true', desc: 'Boolean true', inputType: 'any' },
   { name: 'false', desc: 'Boolean false', inputType: 'any' },
-  { name: 'isvalid', desc: 'Check if valid', inputType: 'any' },
-  { name: 'isnull', desc: 'Check if null', inputType: 'any' },
-  { name: 'isboolean', desc: 'Check if boolean', inputType: 'any' },
-  { name: 'isnumber', desc: 'Check if number', inputType: 'any' },
-  { name: 'isstring', desc: 'Check if string', inputType: 'any' },
-  { name: 'isarray', desc: 'Check if array', inputType: 'any' },
-  { name: 'isobject', desc: 'Check if object', inputType: 'any' },
   { name: 'isempty', desc: 'Check if empty', inputType: 'any' },
-
-  // Alternative operators
-  { name: 'alternative', desc: 'Alternative operator //', inputType: 'any' },
-  { name: 'optional', desc: 'Optional operator ?', inputType: 'any' },
 
   // Type filters
   { name: 'arrays', desc: 'Select only arrays', inputType: 'any' },
@@ -515,6 +498,8 @@ const JQ_WORKER_CODE = `
 
     if (msg.type !== 'execute') return;
     var id = msg.id, query = msg.query;
+    // cache === false: 자동완성 컨텍스트 실행 — 본 실행의 마지막 결과(cachedResult)를 덮어쓰지 않는다
+    var keepResult = msg.cache !== false;
 
     // 입력은 cachedInput 사용 (없으면 msg.input 폴백)
     var input = cachedInput !== null ? cachedInput : msg.input;
@@ -538,7 +523,7 @@ const JQ_WORKER_CODE = `
         var parsed = cachedParsed;
 
         Promise.resolve(jqInstance.json(parsed, query)).then(function(result) {
-          cachedResult = result;
+          if (keepResult) cachedResult = result;
           var text = JSON.stringify(result, null, 2);
           var encoded = new TextEncoder().encode(text);
           self.postMessage(
@@ -548,7 +533,7 @@ const JQ_WORKER_CODE = `
         }).catch(function(err) {
           var t = performance.now() - startTime;
           if (err.message && err.message.includes('Unexpected end of JSON input')) {
-            cachedResult = [];
+            if (keepResult) cachedResult = [];
             self.postMessage({ type: 'result', id: id, resultBuffer: new ArrayBuffer(0), executionTime: t });
           } else {
             self.postMessage({ type: 'error', id: id, message: err.message });
@@ -557,7 +542,7 @@ const JQ_WORKER_CODE = `
       } catch(err) {
         var t2 = performance.now() - startTime;
         if (err.message && err.message.includes('Unexpected end of JSON input')) {
-          cachedResult = [];
+          if (keepResult) cachedResult = [];
           self.postMessage({ type: 'result', id: id, resultBuffer: new ArrayBuffer(0), executionTime: t2 });
         } else {
           self.postMessage({ type: 'error', id: id, message: err.message });

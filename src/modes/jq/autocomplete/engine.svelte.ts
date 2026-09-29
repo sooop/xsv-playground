@@ -71,6 +71,10 @@ export class AutocompleteEngine {
   #pending = new Map<number, Pending>()
   #workerIdle: ReturnType<typeof setTimeout> | null = null
   #lastInputHash: string | null = null
+  /** 워커에 전체 추출을 요청했거나 끝낸 입력의 해시 — 요청이 취소돼도 다시 시도할 수 있게 `#lastInputHash` 와 따로 둔다 */
+  #requestedHash: string | null = null
+  /** 사용자가 직접 닫은 뒤 새 입력·클릭(update)이 오기 전까지 true — 늦게 끝난 워커 추출이 팝업을 되살리지 않게 한다 */
+  #closedByUser = false
   #debounce: ReturnType<typeof setTimeout> | null = null
   #updateId = 0
 
@@ -107,6 +111,8 @@ export class AutocompleteEngine {
       terminateKeyExtractionWorker(this.#worker)
       this.#worker = null
     }
+    // 기다리는 요청이 영원히 멈춰 있지 않도록 실패로 끝낸다
+    for (const [, p] of this.#pending) p.reject(new Error('key extraction worker terminated'))
     this.#pending.clear()
     if (this.#workerIdle) {
       clearTimeout(this.#workerIdle)
@@ -162,6 +168,7 @@ export class AutocompleteEngine {
   invalidate(): void {
     this.#cache.invalidate()
     this.#lastInputHash = null
+    this.#requestedHash = null
   }
 
   /** 쿼리 입력마다 컨텍스트 캐시를 현재 파이프 것만 남기고 비운다 */
@@ -175,7 +182,15 @@ export class AutocompleteEngine {
 
   // ── 표시 ───────────────────────────────────────────────────────────────────
 
+  /** 바깥에서 닫는 경로(Esc·blur·적용·실행) — 진행 중인 update() 가 닫힌 뒤 팝업을 되살리지 못하게 무효화한다 */
   hide(): void {
+    this.#updateId++
+    this.#closedByUser = true
+    this.#dismiss()
+  }
+
+  /** update() 안에서 "보여 줄 것이 없다"는 뜻으로 닫는다 — 뒤이은 갱신을 막지 않는다 */
+  #dismiss(): void {
     this.open = false
     this.items = []
     this.selected = -1
@@ -265,13 +280,14 @@ export class AutocompleteEngine {
     const ta = this.#host.el()
     if (!ta) return
     const updateId = ++this.#updateId
+    this.#closedByUser = false
     const text = ta.value
     const cursor = ta.selectionStart
     const { word, isFieldAccess, isCursorAtWordEnd } = getCurrentWord(text, cursor)
 
     // 커서가 단어 중간이면 띄우지 않는다
     if (!isCursorAtWordEnd && word.length > 0) {
-      this.hide()
+      this.#dismiss()
       return
     }
 
@@ -289,11 +305,11 @@ export class AutocompleteEngine {
         }))
 
       if (matches.length === 0) {
-        this.hide()
+        this.#dismiss()
         return
       }
       if (matches.length === 1 && matches[0]!.name.toLowerCase() === word.toLowerCase()) {
-        this.hide()
+        this.#dismiss()
         return
       }
       this.#show(matches)
@@ -350,17 +366,21 @@ export class AutocompleteEngine {
         }
       }
 
-      // 3) 입력이 바뀌었으면 워커로 전체 추출(3단)
-      if (hashChanged) {
+      // 3) 이 입력을 아직 워커로 추출하지 않았다면 전체 추출(3단).
+      //    이후 키 입력이 update() 를 다시 불러도 이 요청은 버리지 않는다 — 결과는 캐시에 넣고,
+      //    팝업은 그때의 커서 기준으로 다시 그린다. (예전에는 300ms 안의 다음 키 입력이 콜백을
+      //    폐기하고 해시는 이미 '처리됨'이라 대용량 입력의 필드 후보가 영영 안 나왔다.)
+      if (this.#requestedHash !== inputHash) {
+        this.#requestedHash = inputHash
         if (this.#debounce) clearTimeout(this.#debounce)
         this.#debounce = setTimeout(async () => {
-          if (updateId !== this.#updateId) return
           try {
             const result = await this.#requestKeys(inputData)
-            if (updateId !== this.#updateId) return
+            // 그 사이 입력이 바뀌었으면 이 키는 쓸모없다
+            if (this.#lastInputHash !== inputHash) return
             this.#cache.setInputKeys(result.keys, inputHash, false)
             const el = this.#host.el()
-            if (!el) return
+            if (!el || document.activeElement !== el || this.#closedByUser) return
             const cur = getCurrentWord(el.value, el.selectionStart)
             if (!cur.isFieldAccess) return
             const ctx2 = getFieldAccessContext(el.value, el.selectionStart)
@@ -372,7 +392,8 @@ export class AutocompleteEngine {
               ctx2.prefix,
             )
           } catch {
-            /* 워커 실패는 조용히 — 이미 동기/캐시 결과가 떠 있다 */
+            // 워커 실패는 조용히 — 이미 동기/캐시 결과가 떠 있다. 다음 update 에서 다시 시도한다.
+            if (this.#requestedHash === inputHash) this.#requestedHash = null
           }
         }, UPDATE_DEBOUNCE_DELAY)
       }
@@ -433,32 +454,35 @@ export class AutocompleteEngine {
         }
       }
 
+      // 컨텍스트 쿼리를 기다리는 사이 워커 추출이 끝났을 수 있다 — 캐시의 최신 키를 다시 읽는다
+      // (읽지 않으면 대용량 입력에서 컨텍스트가 타임아웃될 때 빈 inputKeys 로 팝업을 닫아 버린다)
+      inputKeys = this.#cache.getInputKeys(inputHash)?.keys ?? inputKeys
       const allKeys = contextKeys.length > 0 ? [...new Set([...contextKeys, ...inputKeys])] : inputKeys
 
       if (updateId !== this.#updateId) return
       if (allKeys.length > 0) this.#renderFields(allKeys, contextKeys, term, hasPfx, pfx)
-      else this.hide()
+      else this.#dismiss()
       return
     }
 
     // 입력이 없는데 필드 접근이면 띄울 것이 없다
     if (needsField && !inputData && isFieldAccess) {
-      this.hide()
+      this.#dismiss()
       return
     }
 
     // ③ 함수 완성
     if (word.length < 1) {
-      this.hide()
+      this.#dismiss()
       return
     }
     const matches = filterFunctions(word)
     if (matches.length === 0) {
-      this.hide()
+      this.#dismiss()
       return
     }
     if (matches.length === 1 && matches[0]!.name.toLowerCase() === word.toLowerCase()) {
-      this.hide()
+      this.#dismiss()
       return
     }
     if (updateId !== this.#updateId) return
@@ -474,12 +498,12 @@ export class AutocompleteEngine {
   ): void {
     const matches = filterAndSortKeys(keys, contextKeys, searchTerm, hasPrefix, prefix)
     if (matches.length === 0) {
-      this.hide()
+      this.#dismiss()
       return
     }
     // 정확히 하나가 완전히 일치하면 더 보여 줄 것이 없다
     if (matches.length === 1 && matches[0]!.name.toLowerCase() === searchTerm.toLowerCase()) {
-      this.hide()
+      this.#dismiss()
       return
     }
     this.#show(matches)
@@ -516,7 +540,14 @@ export class AutocompleteEngine {
    * 팝업이 열려 있을 때의 키 처리. 처리했으면 true(호출부가 preventDefault 한다).
    */
   handleKeydown(e: KeyboardEvent): boolean {
-    if (!this.open) return false
+    if (!this.open) {
+      // 아직 열리기 전(추출·컨텍스트 대기 중)에 누른 Esc 도 "안 띄운다"는 뜻이다. 다른 Esc 처리는 막지 않는다.
+      if (e.key === 'Escape') {
+        this.#updateId++
+        this.#closedByUser = true
+      }
+      return false
+    }
     const ta = this.#host.el()
     if (!ta) return false
 

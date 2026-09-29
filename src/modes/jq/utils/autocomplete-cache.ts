@@ -5,6 +5,9 @@ interface AutocompleteCacheOptions {
   contextTTL?: number;
 }
 
+let lastHashedInput: string | null = null;
+let lastHash: string | null = null;
+
 /**
  * Enhanced cache system for autocomplete
  * Manages both input-based keys and context-based keys with TTL and LRU eviction
@@ -34,16 +37,17 @@ export class AutocompleteCache {
    * @returns {string} Hash string
    */
   static hashInput(input: string): string {
-    // Simple hash based on length and sample characters
-    const len = input.length;
-    const sample = input.substring(0, 100) + input.substring(Math.max(0, len - 100));
-    let hash = 0;
-    for (let i = 0; i < sample.length; i++) {
-      const char = sample.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32bit integer
+    // 앞뒤 100자만 보면 가운데를 같은 길이로 고친 입력이 같은 해시가 되어 옛 키가 남는다 —
+    // 전체를 훑는다. 키 입력마다 불리므로 직전과 같은 문자열이면 결과를 재사용한다.
+    if (input === lastHashedInput && lastHash !== null) return lastHash;
+    let hash = 0x811c9dc5;
+    for (let i = 0, len = input.length; i < len; i++) {
+      hash ^= input.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193);
     }
-    return `${len}_${hash}`;
+    lastHashedInput = input;
+    lastHash = `${input.length}_${hash >>> 0}`;
+    return lastHash;
   }
 
   /**

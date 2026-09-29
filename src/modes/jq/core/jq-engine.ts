@@ -212,10 +212,34 @@ class JqEngine {
     }
   }
 
-  /** jq 쿼리 실행. 워커가 살아 있으면 워커로, 아니면 메인 스레드로. */
-  async execute(input: string, query: string): Promise<ExecuteResult> {
-    if (this.#worker && !this.#workerFailed) return this.#executeInWorker(input, query)
+  /**
+   * jq 쿼리 실행. 워커가 살아 있으면 워커로, 아니면 메인 스레드로.
+   * `cache: false` 는 자동완성 컨텍스트처럼 "본 실행의 결과가 아닌" 실행이다 — 워커가 마지막 결과로
+   * 기억하지 않아야 이후 포맷 전환(`formatResult`)이 엉뚱한 결과를 바꾸지 않는다.
+   */
+  async execute(input: string, query: string, opts: { cache?: boolean } = {}): Promise<ExecuteResult> {
+    if (this.#worker && !this.#workerFailed) return this.#executeInWorker(input, query, opts.cache !== false)
+    await this.#ensureMainThread()
     return this.#executeMainThread(input, query)
+  }
+
+  #mainInit: Promise<void> | null = null
+
+  /**
+   * 초기화가 끝난 뒤 워커가 죽었거나(런타임 오류) 종료된 경우의 폴백. `init()` 은 이미 성공으로
+   * 끝난 약속을 캐시하고 있어 다시 돌지 않으므로, 메인 스레드 인스턴스가 없으면 여기서 올린다.
+   */
+  #ensureMainThread(): Promise<void> {
+    if (this.#instance) return Promise.resolve()
+    if (this.#worker) {
+      terminateJqWorker(this.#worker)
+      this.#worker = null
+    }
+    this.#mainInit ??= this.#initMainThread().catch((e: unknown) => {
+      this.#mainInit = null
+      throw e
+    })
+    return this.#mainInit
   }
 
   /** 입력이 바뀐 경우에만 워커로 보낸다(2MB+ 재전송 방지) */
@@ -230,12 +254,12 @@ class JqEngine {
     else this.#queue.push(msg)
   }
 
-  #executeInWorker(input: string, query: string): Promise<ExecuteResult> {
+  #executeInWorker(input: string, query: string, cache: boolean): Promise<ExecuteResult> {
     this.#sendInputIfChanged(input)
     return new Promise<ExecuteResult>((resolve, reject) => {
       const id = ++this.#requestId
       this.#pending.set(id, { resolve: resolve as Pending['resolve'], reject })
-      this.#post({ type: 'execute', id, query })
+      this.#post({ type: 'execute', id, query, cache })
     })
   }
 
@@ -293,7 +317,7 @@ class JqEngine {
     if (!this.usable) throw new Error('jq 엔진이 준비되지 않았습니다')
 
     try {
-      const execResult = await this.execute(input, partialQuery)
+      const execResult = await this.execute(input, partialQuery, { cache: false })
       // 워커 경로는 resultText 만, 메인 스레드는 result 도 돌려준다
       const result =
         execResult.result !== undefined ? execResult.result : JSON.parse(execResult.resultText)

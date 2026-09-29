@@ -16,9 +16,9 @@ export const FUNCTIONS_WITH_ARGS = new Set([
   'startswith', 'endswith', 'ltrimstr', 'rtrimstr', 'split', 'join',
   'test', 'match', 'capture', 'splits', 'sub', 'gsub', 'scan',
   'indices', 'index', 'rindex', 'pow', 'atan', 'combinations',
-  'strftime', 'strptime', 'format', 'isvalid', 'flatten', 'error', 'debug',
+  'strftime', 'strptime', 'format', 'flatten', 'error', 'debug',
   'reduce', 'foreach', 'label', 'ascii', 'utf8bytelength', 'with_entries',
-  'paths', 'leaf_paths', 'sql',
+  'paths', 'leaf_paths',
 ])
 
 /** 자동완성 후보 한 건 */
