@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { detectFileKind, sniffText } from '../src/shell/fileKind'
+import { detectFileKind, sniffFile, sniffText } from '../src/shell/fileKind'
 
 const ZIP = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0])
 const TEXT = new Uint8Array([0x61, 0x2c, 0x62, 0x0a, 0x31, 0x2c, 0x32, 0x0a])
@@ -8,6 +8,9 @@ describe('detectFileKind — 매직 바이트 → 확장자 → 내용', () => {
   it('ZIP 시그니처면 확장자가 .csv여도 스프레드시트(csv 모드)', () => {
     expect(detectFileKind('wrong.csv', ZIP, '')).toBe('csv')
     expect(detectFileKind('book.xlsx', ZIP, '')).toBe('csv')
+  })
+  it('docx도 ZIP이지만 확장자가 .docx면 md 모드로 간다(스프레드시트 오판 방지)', () => {
+    expect(detectFileKind('report.docx', ZIP, '')).toBe('md')
   })
   it('확장자 매핑', () => {
     expect(detectFileKind('README.md', TEXT, '# hi')).toBe('md')
@@ -21,6 +24,17 @@ describe('detectFileKind — 매직 바이트 → 확장자 → 내용', () => {
     expect(detectFileKind('x.txt', TEXT, '{"a":1}')).toBe('jq')
     expect(detectFileKind('x.txt', TEXT, 'a\tb\n1\t2\n3\t4\n')).toBe('csv')
     expect(detectFileKind('x.txt', TEXT, '# 제목\n\n본문 문단입니다.\n')).toBe('md')
+  })
+})
+
+describe('sniffFile', () => {
+  it('docx는 ZIP 매직 바이트를 갖고 있어도 md 모드로 간다', async () => {
+    const file = new File([ZIP], 'report.docx')
+    expect(await sniffFile(file)).toBe('md')
+  })
+  it('xlsx는 여전히 csv 모드로 간다', async () => {
+    const file = new File([ZIP], 'book.xlsx')
+    expect(await sniffFile(file)).toBe('csv')
   })
 })
 

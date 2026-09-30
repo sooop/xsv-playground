@@ -9,6 +9,7 @@
  * 블록도 뒤늦게 처리한다.
  */
 import { loadScript } from '../../../lib/util/cdn'
+import { inferLanguage, type AutoResult } from './inferLang'
 
 const HLJS_VERSION = '11.11.1'
 const HLJS_BASE = `https://cdnjs.cloudflare.com/ajax/libs/highlight.js/${HLJS_VERSION}`
@@ -16,6 +17,7 @@ const HLJS_BASE = `https://cdnjs.cloudflare.com/ajax/libs/highlight.js/${HLJS_VE
 interface HljsApi {
   getLanguage(name: string): unknown
   highlight(code: string, opts: { language: string }): { value: string }
+  highlightAuto(code: string, subset?: string[]): AutoResult
 }
 
 declare global {
@@ -50,9 +52,18 @@ async function ensureLanguage(hljs: HljsApi, lang: string): Promise<void> {
 async function highlightElement(el: HTMLElement): Promise<void> {
   if (el.dataset.highlighted) return
   el.dataset.highlighted = '1'
-  const lang = el.dataset.lang ?? ''
+  let lang = el.dataset.lang ?? ''
   const hljs = await ensureHljs()
   if (!hljs) return
+  const inferred = !lang
+  if (inferred) {
+    const guess = inferLanguage(el.textContent ?? '', (code, subset) => hljs.highlightAuto(code, subset))
+    if (!guess) return
+    lang = guess
+    // 지정 버튼 라벨에 추정 결과를 보여 준다(누르면 확정 지정)
+    const btn = el.closest('.md-code-block')?.querySelector<HTMLElement>('.md-code-lang-btn')
+    if (btn) btn.textContent = `${guess} · 자동`
+  }
   if (lang) await ensureLanguage(hljs, lang)
   if (!lang || !hljs.getLanguage(lang)) return
   try {

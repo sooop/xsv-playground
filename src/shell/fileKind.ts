@@ -13,15 +13,19 @@ import type { ModeId } from './mode'
 const MD_EXTS = new Set(['.md', '.markdown', '.mdown', '.mkd', '.mdx'])
 const JSON_EXTS = new Set(['.json', '.jsonl', '.ndjson', '.geojson'])
 const CSV_EXTS = new Set(['.csv', '.tsv', '.tab', '.psv'])
+/** docx도 ZIP이라 `looksSpreadsheet()`가 먼저 걸러버린다 — 그보다 앞서 판정해야 한다 */
+const DOCX_EXTS = new Set(['.docx'])
 
-/** 셸의 파일 선택 대화상자 `accept` — CSV 계열 + 마크다운 + JSON + 일반 텍스트 */
+/** 셸의 파일 선택 대화상자 `accept` — CSV 계열 + 마크다운 + JSON + 일반 텍스트 + Word */
 export const OPEN_ACCEPT = [
   FILE_ACCEPT,
   ...MD_EXTS,
   ...JSON_EXTS,
+  ...DOCX_EXTS,
   '.log',
   'text/markdown',
   'application/json',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 ].join(',')
 
 /** 앞부분만 읽어 판정할 때의 크기 */
@@ -33,8 +37,9 @@ function extOf(name: string): string {
 }
 
 export function detectFileKind(name: string, head: Uint8Array, sample: string): ModeId {
-  if (looksSpreadsheet(name, head)) return 'csv'
   const ext = extOf(name)
+  if (DOCX_EXTS.has(ext)) return 'md'
+  if (looksSpreadsheet(name, head)) return 'csv'
   if (MD_EXTS.has(ext)) return 'md'
   if (JSON_EXTS.has(ext)) return 'jq'
   if (CSV_EXTS.has(ext)) return 'csv'
@@ -110,8 +115,9 @@ export async function sniffFile(file: File): Promise<ModeId> {
   try {
     const buf = await file.slice(0, SNIFF_BYTES).arrayBuffer()
     const head = new Uint8Array(buf, 0, Math.min(8, buf.byteLength))
-    if (looksSpreadsheet(file.name, head)) return 'csv'
     const ext = extOf(file.name)
+    if (DOCX_EXTS.has(ext)) return 'md'
+    if (looksSpreadsheet(file.name, head)) return 'csv'
     if (MD_EXTS.has(ext)) return 'md'
     if (JSON_EXTS.has(ext)) return 'jq'
     if (CSV_EXTS.has(ext)) return 'csv'

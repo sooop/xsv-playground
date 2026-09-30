@@ -7,6 +7,9 @@
    * 창 전체 드롭/일반 keydown 캡처는 셸이 대신 처리하므로 여기서는 자체 드롭존의 드롭과
    * `isActive`일 때의 붙여넣기만 다룬다.
    */
+  import { ensurePandoc } from '../../lib/pandoc/client'
+  import { docxToMarkdown, exportDocument, swapExt } from '../../lib/pandoc/docx'
+  import { clearPandocCache, type Progress as PandocProgress } from '../../lib/pandoc/wasmStore'
   import { toasts } from '../../lib/ui/toasts.svelte'
   import type { ModePayload } from '../../shell/mode'
   import { shell } from '../../shell/shell.svelte'
@@ -18,8 +21,9 @@
   import Sidebar from './components/Sidebar.svelte'
   import type { Heading } from './components/TocPanel.svelte'
   import TocPanel from './components/TocPanel.svelte'
-  import Toolbar from './components/Toolbar.svelte'
+  import Toolbar, { type ExportFormat } from './components/Toolbar.svelte'
   import { mdDb, type MdFileSource } from './lib/db'
+  import { setFenceLang } from './lib/codeLang'
   import { parseMarkdown } from './lib/markdown'
   import type { SearchState } from './lib/search'
   import { mdState, type MdDocRecord } from './mdState.svelte'
@@ -36,6 +40,18 @@
   let searchInfo = $state<{ state: SearchState; snippets: string[] } | null>(null)
   let progress = $state(0)
   let activeHeadingId = $state('')
+
+  // ── pandoc(docx 가져오기·내보내기) 진행 상태 ────────────────────────────────
+  interface PandocBusy {
+    label: string
+    loaded?: number
+    total?: number
+  }
+  let busy = $state<PandocBusy | null>(null)
+
+  function formatMb(bytes: number): string {
+    return (bytes / (1024 * 1024)).toFixed(1)
+  }
 
   let readerEl = $state<Reader | null>(null)
   let searchBarEl = $state<SearchBar | null>(null)
@@ -58,6 +74,9 @@
   async function refreshHistory(): Promise<void> {
     mdState.setHistory(await mdDb.getAll())
   }
+
+  // 시작 시 저장된 열람 이력을 사이드바에 채운다(문서를 열기 전에도 보여야 한다)
+  void refreshHistory()
 
   async function loadRaw(name: string, content: string, source: MdFileSource): Promise<void> {
     const mySeq = ++loadSeq
@@ -121,19 +140,70 @@
     return [head, sep, body].filter((l) => l !== '').join('\n')
   }
 
+  // ── 코드블록 언어 지정(보기 모드) ─────────────────────────────────────────
+  async function setCodeLang(index: number, lang: string): Promise<void> {
+    const doc = mdState.currentDoc
+    if (!doc) return
+    const next = setFenceLang(doc.content, index, lang)
+    if (next === null) {
+      toasts.push('이 코드블록은 언어를 지정할 수 없습니다(인용문·목록 안이거나 들여쓰기 코드블록). 편집 모드에서 고쳐 주세요', 'warn')
+      return
+    }
+    try {
+      await mdDb.updateContent(doc.id, next)
+      mdState.patchCurrentDoc({ content: next })
+      renderedHtml = parseMarkdown(next)
+    } catch (err) {
+      toasts.push(`언어 지정을 저장하지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, 'warn')
+    }
+  }
+
   // ── 내보내기 ──────────────────────────────────────────────────────────────
-  function exportMarkdown(): void {
-    if (!mdState.currentDoc) return
-    const blob = new Blob([mdState.currentDoc.content], { type: 'text/markdown;charset=utf-8' })
+  function downloadBlob(blob: Blob, filename: string): void {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = mdState.currentDoc.name || 'document.md'
+    a.download = filename
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
-    toasts.push('내보내기 완료', 'ok')
+  }
+
+  async function clearEngineCache(): Promise<void> {
+    const ok = await clearPandocCache()
+    toasts.push(
+      ok ? 'pandoc 엔진 캐시를 삭제했습니다. 다음 Word 변환 때 다시 내려받습니다' : '캐시를 삭제하지 못했습니다',
+      ok ? 'ok' : 'warn',
+    )
+  }
+
+  async function exportAs(format: ExportFormat): Promise<void> {
+    if (!mdState.currentDoc) return
+    const name = mdState.currentDoc.name || 'document'
+
+    if (format === 'md') {
+      const blob = new Blob([mdState.currentDoc.content], { type: 'text/markdown;charset=utf-8' })
+      downloadBlob(blob, swapExt(name, 'md'))
+      toasts.push('내보내기 완료', 'ok')
+      return
+    }
+
+    busy = { label: 'pandoc 엔진 준비 중…' }
+    try {
+      await ensurePandoc((p: PandocProgress) => {
+        busy = { label: '엔진 내려받는 중 (최초 1회)', loaded: p.loaded, total: p.total }
+      })
+      busy = { label: '변환 중…' }
+      const { blob, warningCount } = await exportDocument(mdState.currentDoc.content, format)
+      downloadBlob(blob, swapExt(name, format))
+      toasts.push('내보내기 완료', 'ok')
+      if (warningCount > 0) toasts.push(`pandoc 경고 ${warningCount}건 — 일부 서식이 생략됐을 수 있습니다`, 'warn')
+    } catch (err) {
+      toasts.push(`내보내기 실패: ${err instanceof Error ? err.message : String(err)}`, 'warn')
+    } finally {
+      busy = null
+    }
   }
 
   // ── 검색 열기/닫기 ────────────────────────────────────────────────────────
@@ -253,11 +323,37 @@
   // ── ModeHandle (셸 계약) ───────────────────────────────────────────────────
 
   export async function openFile(file: File): Promise<void> {
+    if (/\.docx$/i.test(file.name)) {
+      await openDocxFile(file)
+      return
+    }
     try {
       const text = await file.text()
       await loadRaw(file.name, text, 'file')
     } catch (err) {
       toasts.push(`파일 읽기 실패: ${err instanceof Error ? err.message : String(err)}`, 'warn')
+    }
+  }
+
+  async function openDocxFile(file: File): Promise<void> {
+    if (busy) {
+      toasts.push('이미 변환 중입니다. 잠시 후 다시 시도하세요', 'warn')
+      return
+    }
+    busy = { label: 'pandoc 엔진 준비 중…' }
+    try {
+      await ensurePandoc((p: PandocProgress) => {
+        busy = { label: '엔진 내려받는 중 (최초 1회)', loaded: p.loaded, total: p.total }
+      })
+      busy = { label: '변환 중…' }
+      const { markdown, warningCount, skippedImageCount } = await docxToMarkdown(file)
+      await loadRaw(file.name, markdown, 'docx')
+      if (warningCount > 0) toasts.push(`pandoc 경고 ${warningCount}건 — 일부 서식이 생략됐을 수 있습니다`, 'warn')
+      if (skippedImageCount > 0) toasts.push(`이미지 ${skippedImageCount}개는 형식을 지원하지 않아 건너뛰었습니다`, 'warn')
+    } catch (err) {
+      toasts.push(`Word 문서를 변환하지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, 'warn')
+    } finally {
+      busy = null
     }
   }
 
@@ -315,7 +411,7 @@
     <Sidebar onLoad={loadById} onDelete={deleteHistory} />
 
     <div class="main-col">
-      <Toolbar onExport={exportMarkdown} onRename={handleRename} />
+      <Toolbar onExport={(f) => void exportAs(f)} onClearCache={() => void clearEngineCache()} onRename={handleRename} />
       <SearchBar
         bind:this={searchBarEl}
         count={searchInfo?.state.count ?? 0}
@@ -335,7 +431,7 @@
             class:over={dropHover}
             role="button"
             tabindex="0"
-            aria-label="마크다운 파일을 드래그하거나 클릭해서 열기"
+            aria-label="마크다운 또는 Word 파일을 드래그하거나 클릭해서 열기"
             ondragover={(e) => {
               e.preventDefault()
               dropHover = true
@@ -360,7 +456,7 @@
                 <polyline points="10 9 9 9 8 9" />
               </svg>
             </div>
-            <h1>마크다운 파일 열기</h1>
+            <h1>마크다운·Word(.docx) 파일 열기</h1>
             <p>
               파일을 이곳에 드래그하거나 아래 버튼으로 선택하세요<br />
               <span class="label">Ctrl+V로 클립보드 마크다운 붙여넣기 가능</span>
@@ -381,6 +477,7 @@
                 onSearchState={(s) => (searchInfo = s)}
                 onProgress={(p) => (progress = p)}
                 onHeadingChange={(id) => (activeHeadingId = id)}
+                onSetCodeLang={(i, l) => void setCodeLang(i, l)}
               />
               <TocPanel {headings} activeId={activeHeadingId} />
             {/if}
@@ -423,6 +520,22 @@
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"
           stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
       </button>
+    </div>
+  {/if}
+
+  {#if busy}
+    <!-- 변환·다운로드 중에는 뒤 화면을 막는 모달 — 닫을 수 없다(Esc/바깥 클릭 무시) -->
+    <div class="pandoc-backdrop" role="presentation">
+      <div class="pandoc-card" role="alertdialog" aria-modal="true" aria-label={busy.label} aria-live="polite">
+        <div class="dz-spinner" aria-hidden="true"></div>
+        <p class="dz-busy-label">{busy.label}</p>
+        {#if busy.total}
+          <div class="dz-progress" role="progressbar" aria-valuenow={Math.round(((busy.loaded ?? 0) / busy.total) * 100)}>
+            <div class="dz-progress-bar" style="width:{Math.min(100, ((busy.loaded ?? 0) / busy.total) * 100)}%"></div>
+          </div>
+          <p class="dz-busy-detail">{formatMb(busy.loaded ?? 0)} / {formatMb(busy.total)}MB</p>
+        {/if}
+      </div>
     </div>
   {/if}
 
@@ -492,6 +605,28 @@
     background: var(--accent-soft);
     outline: none;
   }
+  .pandoc-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-modal);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-overlay);
+    cursor: progress;
+  }
+  .pandoc-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    min-width: 280px;
+    padding: 24px 32px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-raised);
+    box-shadow: var(--shadow-pop);
+  }
   .dz-icon {
     opacity: 0.4;
   }
@@ -507,6 +642,44 @@
     color: var(--text-dim);
     text-align: center;
     line-height: 1.7;
+  }
+
+  .dz-spinner {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: 2.5px solid var(--border);
+    border-top-color: var(--accent);
+    animation: dz-spin 0.7s linear infinite;
+  }
+  @keyframes dz-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  .dz-busy-label {
+    margin: 0;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .dz-progress {
+    width: 220px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border);
+    overflow: hidden;
+  }
+  .dz-progress-bar {
+    height: 100%;
+    background: var(--accent);
+    transition: width 90ms linear;
+  }
+  .dz-busy-detail {
+    margin: 0;
+    font-size: 11px;
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
   }
 
   .reader-wrap {

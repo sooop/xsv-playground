@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount, untrack } from 'svelte'
+  import ContextMenu, { type MenuItem } from '../../../lib/ui/ContextMenu.svelte'
   import { shell } from '../../../shell/shell.svelte'
   import { themeCtl } from '../../../shell/theme.svelte'
   import { mdDb } from '../lib/db'
@@ -26,8 +27,33 @@
     onSearchState?: (s: { state: SearchState; snippets: string[] } | null) => void
     onProgress?: (p: number) => void
     onHeadingChange?: (id: string) => void
+    /** 언어 표기 없는 코드블록에 사용자가 언어를 지정했을 때 (문서 순서 번호, 언어) */
+    onSetCodeLang?: (index: number, lang: string) => void
   }
-  let { html = '', onHeadings, onSearchState, onProgress, onHeadingChange }: Props = $props()
+  let { html = '', onHeadings, onSearchState, onProgress, onHeadingChange, onSetCodeLang }: Props = $props()
+
+  const CODE_LANGS: [label: string, lang: string][] = [
+    ['일반 텍스트', 'text'],
+    ['JSON', 'json'],
+    ['YAML', 'yaml'],
+    ['XML / HTML', 'xml'],
+    ['SQL', 'sql'],
+    ['Bash', 'bash'],
+    ['PowerShell', 'powershell'],
+    ['JavaScript', 'javascript'],
+    ['TypeScript', 'typescript'],
+    ['Python', 'python'],
+    ['C#', 'csharp'],
+    ['Java', 'java'],
+    ['CSS', 'css'],
+    ['Diff', 'diff'],
+    ['INI / TOML', 'ini'],
+  ]
+  // 메뉴가 닫힌 뒤에 run이 불릴 수 있으므로 항목은 여는 시점의 블록 번호를 캡처해 만든다
+  let langMenu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null)
+  function langMenuItems(index: number): MenuItem[] {
+    return CODE_LANGS.map(([label, lang]) => ({ label, run: () => onSetCodeLang?.(index, lang) }))
+  }
 
   let scrollEl = $state<HTMLDivElement | null>(null)
   let contentEl = $state<HTMLDivElement | null>(null)
@@ -97,6 +123,14 @@
     if (img) {
       e.preventDefault()
       mdState.openLightbox(img.src)
+      return
+    }
+
+    const langBtn = target.closest<HTMLButtonElement>('.md-code-lang-btn')
+    if (langBtn) {
+      e.preventDefault()
+      const r = langBtn.getBoundingClientRect()
+      langMenu = { x: r.left, y: r.bottom + 4, items: langMenuItems(Number(langBtn.dataset.codeIndex)) }
       return
     }
 
@@ -274,6 +308,10 @@
   <div id="md-reader-content" bind:this={contentEl}>{@html html}</div>
 </div>
 
+{#if langMenu}
+  <ContextMenu x={langMenu.x} y={langMenu.y} items={langMenu.items} onClose={() => (langMenu = null)} />
+{/if}
+
 <style>
   .reader-scroll {
     flex: 1;
@@ -442,10 +480,36 @@
     align-items: center;
     gap: 4px;
   }
-  :global(.md-mode .md-code-block pre) {
+  /* `#md-reader-content pre`(id 특이도)가 테두리·둥근 모서리를 주므로 같은 특이도로 덮어쓴다 —
+     바깥 .md-code-block이 테두리와 모서리를 한 번만 맡는다 */
+  :global(.md-mode #md-reader-content .md-code-block pre) {
     margin: 0;
     border: none;
     border-radius: 0;
+    background: var(--bg-gutter);
+  }
+  :global(.md-mode .md-code-lang-btn) {
+    height: 20px;
+    padding: 0 7px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: none;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    transition:
+      color var(--dur) var(--ease),
+      border-color var(--dur) var(--ease),
+      background var(--dur) var(--ease);
+  }
+  :global(.md-mode .md-code-lang-btn:hover),
+  :global(.md-mode .md-code-lang-btn:focus-visible) {
+    color: var(--accent);
+    border-color: var(--accent-line);
+    background: var(--bg-raised);
+    outline: none;
   }
   :global(.md-mode .md-code-open-btn) {
     height: 22px;

@@ -8,7 +8,7 @@
 import { STORES } from '../../../lib/data/idb'
 import { kvStore, type KvStore } from '../../../lib/data/kvStore'
 
-export type MdFileSource = 'file' | 'paste' | 'shell'
+export type MdFileSource = 'file' | 'paste' | 'shell' | 'docx'
 
 export interface MdFileRecord {
   id?: number

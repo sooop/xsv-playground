@@ -1,13 +1,32 @@
 <script lang="ts">
+  import ContextMenu, { type MenuItem } from '../../../lib/ui/ContextMenu.svelte'
   import { dismissable } from '../../../lib/ui/dismiss'
   import { shell } from '../../../shell/shell.svelte'
   import { mdState } from '../mdState.svelte'
 
+  export type ExportFormat = 'md' | 'docx' | 'rtf'
+
   interface Props {
-    onExport: () => void
+    onExport: (format: ExportFormat) => void
+    onClearCache: () => void
     onRename: (name: string) => Promise<void>
   }
-  let { onExport, onRename }: Props = $props()
+  let { onExport, onClearCache, onRename }: Props = $props()
+
+  let exportMenu = $state<{ x: number; y: number } | null>(null)
+
+  function openExportMenu(e: MouseEvent): void {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    exportMenu = { x: r.left, y: r.bottom + 4 }
+  }
+
+  const exportMenuItems: MenuItem[] = [
+    { label: 'Markdown (.md)', accel: 'm', run: () => onExport('md') },
+    { label: 'Word (.docx)', accel: 'w', run: () => onExport('docx') },
+    { label: 'RTF (.rtf)', accel: 'r', run: () => onExport('rtf') },
+    { label: '', sep: true },
+    { label: 'pandoc 엔진 캐시 삭제', accel: 'c', run: () => onClearCache() },
+  ]
 
   let showTypo = $state(false)
   let titleDraft = $state('')
@@ -164,7 +183,7 @@
       {/if}
     </button>
 
-    <button class="btn icon" onclick={onExport} aria-label="마크다운으로 내보내기" title="내보내기 (.md)">
+    <button class="btn icon" onclick={openExportMenu} aria-label="내보내기" title="내보내기 (.md/.docx/.rtf)">
       <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"
         stroke-linecap="round" stroke-linejoin="round">
         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -172,6 +191,10 @@
         <path d="M12 15V3" />
       </svg>
     </button>
+  {/if}
+
+  {#if exportMenu}
+    <ContextMenu x={exportMenu.x} y={exportMenu.y} items={exportMenuItems} onClose={() => (exportMenu = null)} />
   {/if}
 
   <button
