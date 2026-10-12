@@ -4,7 +4,23 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#faf9f5" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#262624" media="(prefers-color-scheme: dark)" />
     <title>Workbench</title>
+    <!-- 플래시 방지: 앱이 마운트되기 전에 저장된 테마 선호(없으면 시스템)로 data-theme/배경을 미리 맞춘다.
+         해석 규칙은 src/shell/theme.svelte.ts 와 같고, 이후 App.svelte 가 같은 값을 다시 쓴다. -->
+    <script>
+      try {
+        var p = localStorage.getItem('xsv.themePref')
+        p = p ? JSON.parse(p) : 'system'
+        var dark = p === 'dark' || (p !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+      } catch (e) {}
+    </script>
+    <style>
+      html { background: #262624; }
+      html[data-theme='light'] { background: #faf9f5; }
+    </style>
   </head>
   <body>
     <div id="app"></div>

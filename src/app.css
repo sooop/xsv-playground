@@ -1,15 +1,16 @@
 /*
- * 디자인 방향: "정밀 계측기"
+ * 디자인 방향: Claude 테마 — md-notes 와 같은 팔레트를 CSV·jq·Markdown 세 모드가 공유한다.
  *
- * 그래파이트 베이스 + 앰버 신호색. 데이터 그리드(셀·헤더·거터)는 모노스페이스로 계측 장비의
- * 성격을 유지하고, 버튼/라벨/다이얼로그 등 일반 UI 텍스트는 가독성 좋은 UI 폰트를 쓴다.
+ * 라이트 = 크림(#faf9f5) + 테라코타, 다크 = 따뜻한 차콜(#262624) + 연한 테라코타.
+ * 데이터 그리드(셀·헤더·거터)는 모노스페이스로 계측 장비의 성격을 유지하고,
+ * 버튼/라벨/다이얼로그 등 일반 UI 텍스트는 Pretendard Variable 우선 스택을 쓴다.
  * 단일 HTML/오프라인 제약으로 웹폰트는 쓰지 않고, 로컬에 설치되어 있다고 가정한 폰트만 나열한다.
  */
 
 :root {
   /* 로컬 폰트만 사용 (외부 요청 0건 유지) */
-  --font-ui: 'Pretendard', 'Pretendard Variable', -apple-system, 'Segoe UI', system-ui,
-    sans-serif;
+  --font-ui: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui,
+    'Segoe UI', 'Noto Sans KR', 'Malgun Gothic', sans-serif;
   --font-mono: 'Geist Mono', 'JetBrains Mono', 'Cascadia Code', 'Cascadia Mono', 'SF Mono',
     'Menlo', 'DejaVu Sans Mono', 'Consolas', ui-monospace, monospace;
 
@@ -40,115 +41,172 @@
 
   color-scheme: dark;
 
-  /* --- 다크 (기본) --- */
-  --bg: #0d0f12;
-  --bg-raised: #14171c;
-  --bg-header: #191d23;
-  --bg-gutter: #111419;
-  --bg-hover: #1b2028;
+  /* --- 다크 (기본) — Claude 테마 다크: 따뜻한 차콜 + 테라코타 --- */
+  --bg: #262624;
+  --bg-raised: #302f2c;
+  --bg-header: #2e2e2b;
+  --bg-gutter: #2a2a28;
+  --bg-hover: #33322f;
   --bg-zebra: rgba(255, 255, 255, 0.026);
-  --bg-overlay: rgba(6, 7, 9, 0.72);
+  --bg-overlay: rgba(20, 20, 19, 0.72);
 
-  --border: #23282f;
-  --border-soft: #1c2027;
-  --border-strong: #363e49;
+  --border: #3d3c38;
+  --border-soft: #34332f;
+  --border-strong: #55544e;
 
-  --text: #dfe4ea;
-  --text-dim: #8b949e;
-  --text-faint: #5b636d;
+  --text: #f0eee6;
+  --text-dim: #a6a59c;
+  --text-faint: #96958c;
 
-  --accent: #f2a33c;
-  --accent-text: #100c04;
-  --accent-soft: rgba(242, 163, 60, 0.14);
-  --accent-line: rgba(242, 163, 60, 0.45);
+  --accent: #e8956f;
+  --accent-text: #1f1e1d;
+  --accent-soft: rgba(232, 149, 111, 0.16);
+  --accent-line: rgba(232, 149, 111, 0.5);
 
-  --hit-bg: rgba(242, 163, 60, 0.26);
-  --hit-text: #ffd79a;
+  /* 채워진 배경(accent/danger/sel/comment) 위에 올리는 글자색 — 라이트/다크에서 반전된다 */
+  --on-fill: #1f1e1d;
 
-  --sel: #4d94f8;
-  --sel-bg: rgba(77, 148, 248, 0.14);
-  --sel-line: rgba(77, 148, 248, 0.9);
-  --sel-head: rgba(77, 148, 248, 0.2);
+  --hit-bg: rgba(232, 149, 111, 0.3);
+  --hit-text: #ffd9c5;
 
-  --danger: #f2555a;
-  --ok: #46c08a;
+  --sel: #6ea6f5;
+  --sel-bg: rgba(110, 166, 245, 0.14);
+  --sel-line: rgba(110, 166, 245, 0.9);
+  --sel-head: rgba(110, 166, 245, 0.2);
+
+  --danger: #f2a49c;
+  --ok: #8fcf8f;
 
   /*
    * 기능적 액센트 — 장식이 아니라 상태를 구분하기 위한 색이다.
-   * 앰버(정렬)와 청록(필터)이 겹쳐도 각각 무슨 상태인지 읽히는 것이 목적.
+   * 테라코타(정렬)와 청록(필터)이 겹쳐도 각각 무슨 상태인지 읽히는 것이 목적.
    */
-  --c-num: #4ecdc4; /* 숫자 칼럼 */
-  --c-date: #b48ef0; /* 날짜 칼럼 */
-  --c-filter: #57c98b; /* 칼럼 필터 활성 */
-  --c-hide: #e0708a; /* 숨김 상태 */
+  --c-num: #6fd3cb; /* 숫자 칼럼 */
+  --c-date: #c4a6f5; /* 날짜 칼럼 */
+  --c-filter: #8fcf8f; /* 칼럼 필터 활성 */
+  --c-hide: #ee8aa3; /* 숨김 상태 */
 
   /*
-   * 찾기. 스마트 필터 강조(앰버)와 반드시 달라야 한다 — 둘이 동시에 켜져 있을 때
+   * 찾기. 스마트 필터 강조(테라코타)와 반드시 달라야 한다 — 둘이 동시에 켜져 있을 때
    * 어느 쪽 매치인지 구분되지 않으면 쓸모가 없다.
    */
-  --find-line: #4bb3d4;
-  --find-bg: rgba(75, 179, 212, 0.3);
-  --find-text: #cdeef9;
-  --find-on-text: #05202b;
-  --find-cur: #7ee0ff;
+  --find-line: #6cc4e4;
+  --find-bg: rgba(108, 196, 228, 0.3);
+  --find-text: #d4f1fb;
+  --find-on-text: #0b2631;
+  --find-cur: #8fd8f0;
 
   /* 셀 본문 색조 — 판독성이 우선이므로 본문 색에서 살짝 기울인 정도 */
   --text-num: #c8e6e2;
   --text-date: #ddd2f2;
 
-  --shadow-pop: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 28px -6px rgba(0, 0, 0, 0.65);
+  --shadow-pop: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 28px -6px rgba(0, 0, 0, 0.55);
+
+  /* --- Markdown 모드(md-notes) 전용 토큰 — 이름이 앱 토큰과 겹치지 않는 것만 --- */
+  --surface: #2e2e2b;
+  --surface-2: #353532;
+  --muted: var(--text-dim);
+  --hover: var(--bg-hover);
+  --selected: #403f3a;
+  --primary: var(--accent);
+  --on-primary: var(--on-fill);
+  --shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  --font: var(--font-ui);
+  --font-code: var(--font-mono);
+  --mark-bg: rgba(255, 200, 0, 0.3);
+  --mark-cur-bg: rgba(255, 140, 0, 0.55);
+  --mark-cur-line: #ff9f33;
+  --comment: #7aa7f0;
+  --comment-bg: rgba(122, 167, 240, 0.22);
+  --comment-bg-strong: rgba(122, 167, 240, 0.42);
+  /* 코드 블록 문법 강조 */
+  --hl-keyword: #e8956f;
+  --hl-string: #a3c98a;
+  --hl-number: #e0b46a;
+  --hl-comment: #a2a198;
+  --hl-function: #8fb4e8;
+  --hl-type: #d49fd4;
+  --hl-property: #7fcdd3;
+  --hl-tag: #e8956f;
+  --hl-punct: #a6a59c;
+  --hl-inserted: #8fcf8f;
+  --hl-deleted: #f2a49c;
 }
 
 :root[data-theme='light'] {
   color-scheme: light;
 
-  --bg: #fbfaf7;
+  --bg: #faf9f5;
   --bg-raised: #ffffff;
-  --bg-header: #f3f1ec;
-  --bg-gutter: #f6f4f0;
-  --bg-hover: #eeebe4;
-  --bg-zebra: rgba(24, 20, 12, 0.028);
-  --bg-overlay: rgba(250, 249, 246, 0.75);
+  --bg-header: #f5f4ed;
+  --bg-gutter: #f0eee6;
+  --bg-hover: #efede4;
+  --bg-zebra: rgba(20, 20, 19, 0.028);
+  --bg-overlay: rgba(250, 249, 245, 0.75);
 
-  --border: #e0dbd0;
-  --border-soft: #eae6dd;
-  --border-strong: #c3bbaa;
+  --border: #e8e6dc;
+  --border-soft: #eeece3;
+  --border-strong: #cfcdc2;
 
-  --text: #1b1d20;
-  --text-dim: #63605a;
-  --text-faint: #97928a;
+  --text: #141413;
+  --text-dim: #6b6a64;
+  --text-faint: #75746c;
 
-  --accent: #b3610a;
-  --accent-text: #fffaf2;
-  --accent-soft: rgba(179, 97, 10, 0.1);
-  --accent-line: rgba(179, 97, 10, 0.4);
+  --accent: #a94f2b;
+  --accent-text: #ffffff;
+  --accent-soft: rgba(193, 95, 60, 0.11);
+  --accent-line: rgba(169, 79, 43, 0.45);
 
-  --hit-bg: rgba(226, 154, 27, 0.32);
-  --hit-text: #4d2a00;
+  --on-fill: #ffffff;
 
-  --sel: #1f6feb;
-  --sel-bg: rgba(31, 111, 235, 0.1);
-  --sel-line: rgba(31, 111, 235, 0.9);
-  --sel-head: rgba(31, 111, 235, 0.16);
+  --hit-bg: rgba(217, 119, 87, 0.28);
+  --hit-text: #5a2410;
 
-  --danger: #c92a2f;
-  --ok: #157f52;
+  --sel: #1a62d6;
+  --sel-bg: rgba(26, 98, 214, 0.09);
+  --sel-line: rgba(26, 98, 214, 0.9);
+  --sel-head: rgba(26, 98, 214, 0.15);
 
-  --c-num: #0c7b70;
+  --danger: #b3261e;
+  --ok: #2a7a2d;
+
+  --c-num: #0c6f66;
   --c-date: #6b3fb0;
-  --c-filter: #1c8a52;
-  --c-hide: #b83a5c;
+  --c-filter: #2a7a2d;
+  --c-hide: #b0345a;
 
-  --find-line: #0d7ea6;
-  --find-bg: rgba(13, 126, 166, 0.24);
+  --find-line: #0b6f93;
+  --find-bg: rgba(11, 111, 147, 0.2);
   --find-text: #05323f;
   --find-on-text: #ffffff;
-  --find-cur: #075e7d;
+  --find-cur: #075a79;
 
   --text-num: #17423e;
   --text-date: #35275c;
 
-  --shadow-pop: 0 1px 2px rgba(60, 50, 30, 0.09), 0 8px 26px -6px rgba(60, 50, 30, 0.22);
+  --shadow-pop: 0 1px 2px rgba(20, 20, 19, 0.08), 0 8px 26px -6px rgba(20, 20, 19, 0.2);
+
+  --surface: #f5f4ed;
+  --surface-2: #f0eee6;
+  --selected: #e8e6dc;
+  --shadow: 0 4px 16px rgba(20, 20, 19, 0.12);
+  --mark-bg: rgba(255, 200, 0, 0.4);
+  --mark-cur-bg: rgba(255, 140, 0, 0.75);
+  --mark-cur-line: #e67800;
+  --comment: #3d6fc4;
+  --comment-bg: rgba(61, 111, 196, 0.18);
+  --comment-bg-strong: rgba(61, 111, 196, 0.36);
+  --hl-keyword: #b3471f;
+  --hl-string: #3b7a3a;
+  --hl-number: #8f5b00;
+  --hl-comment: #6a695f;
+  --hl-function: #2b5fb0;
+  --hl-type: #8a3d8f;
+  --hl-property: #1b6f78;
+  --hl-tag: #b3471f;
+  --hl-punct: #6b6a64;
+  --hl-inserted: #2f7d32;
+  --hl-deleted: #b3261e;
 }
 
 * {
@@ -309,11 +367,11 @@ select {
 }
 .btn.primary.danger {
   background: var(--danger);
-  color: #fff;
+  color: var(--on-fill);
 }
 .btn.primary.danger:hover:not(:disabled) {
   background: var(--danger);
-  color: #fff;
+  color: var(--on-fill);
 }
 
 /* 대문자 레터스페이스 라벨 — 계측기 눈금 같은 성격 */

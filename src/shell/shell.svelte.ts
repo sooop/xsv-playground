@@ -53,6 +53,18 @@ class ShellController {
   async openFiles(files: FileList | File[] | null | undefined): Promise<void> {
     const file = files?.[0]
     if (!file) return
+    // Markdown 모드가 활성이면 여러 파일과 백업 zip을 모두 그 모드로 보낸다(문서 라이브러리에 추가).
+    // 그 밖의 모드에서는 모드당 1문서이므로 첫 파일만 종류별로 라우팅한다.
+    // 단, 모든 파일이 md 종류(또는 백업 zip)일 때만이다 — json·표 파일은 평소처럼 해당 모드로 간다.
+    if (this.active === 'md') {
+      const list = [...files]
+      const kinds = await Promise.all(list.map((f) => (/\.zip$/i.test(f.name) ? 'md' : sniffFile(f))))
+      const handle = kinds.every((k) => k === 'md') ? await this.#waitHandle('md') : null
+      if (handle?.openFiles) {
+        await handle.openFiles(list)
+        return
+      }
+    }
     const to = await sniffFile(file)
     this.mounted[to] = true
     const handle = await this.#waitHandle(to)

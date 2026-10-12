@@ -24,7 +24,6 @@ import {
   swapExt,
 } from '../src/lib/pandoc/docx'
 import { PANDOC_VERSION } from '../src/lib/pandoc/wasmStore'
-import { markdownToPlainHtml } from '../src/modes/md/lib/markdown'
 
 function readZipEntry(buf: Buffer, name: string): Buffer | null {
   const centralSig = Buffer.from([0x50, 0x4b, 0x01, 0x02])
@@ -74,27 +73,27 @@ describe('pandoc-wasm 옵션 빌더', () => {
     expect(result.stdout).toContain('제목')
   })
 
-  it('rtf 내보내기: standalone 헤더로 시작한다', async () => {
-    const html = markdownToPlainHtml('# 제목\n\n본문입니다.')
-    const result = await convert(buildRtfExportOptions(), null, { 'in.html': html })
+  it('rtf 내보내기: gfm 입력에서 standalone 헤더로 시작한다', async () => {
+    const result = await convert(buildRtfExportOptions(), null, { 'in.md': '# 제목\n\n본문입니다.' })
     const blob = result.files['out.rtf']
     expect(blob).toBeDefined()
     const text = Buffer.from(await blob!.arrayBuffer()).toString('latin1')
-    expect(text.startsWith('{\\rtf1')).toBe(true)
+    expect(text.startsWith('{') && text.slice(2, 6) === 'rtf1').toBe(true)
   })
 
-  it('docx 내보내기: reference-doc 스타일이 적용되고, 병합 셀과 이미지가 살아남는다', async () => {
-    const html = markdownToPlainHtml('# 제목') + `
-      <img src="data:image/png;base64,${PNG_B64}" alt="테스트">
-      <table>
-        <tr><td colspan="2">병합된 헤더</td></tr>
-        <tr><td rowspan="2">세로 병합</td><td>B1</td></tr>
-        <tr><td>B2</td></tr>
-      </table>
-    `
+  it('docx 내보내기(gfm 입력): reference-doc 스타일이 적용되고, 표와 이미지가 살아남는다', async () => {
+    const md = `# 제목
+
+![테스트](data:image/png;base64,${PNG_B64})
+
+| 가 | 나 |
+| --- | --- |
+| A1 | B1 |
+| A2 | B2 |
+`
 
     const toDocx = await convert(buildDocxExportOptions(), null, {
-      'in.html': html,
+      'in.md': md,
       'reference.docx': referenceDocx,
     })
     const outDocxBlob = toDocx.files['out.docx']
@@ -105,10 +104,10 @@ describe('pandoc-wasm 옵션 빌더', () => {
     const styles = readZipEntry(outDocxBuf, 'word/styles.xml')?.toString('utf8') ?? ''
     expect(styles).toContain('Pretendard')
 
-    // 병합 셀(colspan → gridSpan, rowspan → vMerge)이 살아남는지 확인
+    // gfm 표 → docx 표
     const document = readZipEntry(outDocxBuf, 'word/document.xml')?.toString('utf8') ?? ''
-    expect(document).toContain('gridSpan')
-    expect(document).toContain('vMerge')
+    expect(document).toContain('<w:tbl>')
+    expect(document).toContain('B2')
 
     // docx → md 왕복: extract-media로 뽑은 이미지가 다시 data URI로 인라인되는지 확인
     const back = await convert(buildDocxImportOptions(), null, { 'in.docx': new Blob([outDocxBuf]) })

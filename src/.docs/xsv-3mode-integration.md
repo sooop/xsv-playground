@@ -4,6 +4,13 @@
 **Target Route**: src/  
 **Status**: Draft  
 
+> **후속 변경 (2026-10-12)** — Markdown 모드를 md-viewer(marked 기반 뷰어)에서 **md-notes(Milkdown WYSIWYG + 문서 라이브러리)의 스탠드얼론 모드로 완전 교체**했다. 이 문서의 md 관련 결정은 아래처럼 바뀌었다.
+> - 도구당 1문서 → md는 **문서 라이브러리**(IndexedDB `notes-standalone`·`notes-history`, 새 DB). 기존 `md.files` 열람 이력은 **이관 없이 폐기**(스토어는 방치).
+> - 디자인 기준 xsv 토큰 → **md-notes의 Claude 테마(크림·테라코타)를 앱 전체(CSV·jq 포함)의 토큰**으로 채택. 테마 전환은 셸 `themeCtl` 하나.
+> - `marked`·`dompurify`·highlight.js·Mermaid·KaTeX 제거. 목차 패널·커맨드 팰릿·타이포그래피 오버레이는 사라지고 미니맵·라이트박스·코드블록 보내기·RTF 내보내기는 Milkdown 위에 재구현.
+> - 새 기능: TSV/CSV 붙여넣기 표 변환, 코멘트, 버전 이력, 전체 백업 zip. md 모드가 활성일 때만 여러 파일·zip을 받는다.
+> - md-notes의 서버 모드는 가져오지 않았다. 아래 P7-md 이하의 md 설계는 **구 md-viewer 기준의 역사적 기록**이다.
+
 ## Overview
 
 세 개의 독립적인 도구(CSV 편집기, jq 쿼리 빌더, Markdown 뷰어)를 하나의 Svelte 앱으로 통합하여 단일 `dist/index.html`로 빌드 및 배포하는 계획입니다. 기존 xsv-playground의 디자인 토큰과 테마를 기준으로 하며, 각 모드의 기능을 최대한 보존합니다.

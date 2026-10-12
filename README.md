@@ -5,7 +5,7 @@
 열면 그대로 동작한다. 데이터는 브라우저 밖으로 나가지 않는다.
 
 CSV/TSV를 다루는 모든 기능은 외부 네트워크 요청이 **0건**이라 오프라인·사내 폐쇄망에 파일 하나만
-전달해도 된다. 무거운 라이브러리(SheetJS·jq-web·highlight.js·Mermaid·KaTeX)는 최종 HTML에 담지
+전달해도 된다. 무거운 라이브러리(SheetJS·jq-web·pandoc 엔진)는 최종 HTML에 담지
 않고 **그 기능을 실제로 쓰는 시점에 CDN에서 받아온다** — 세션당 최초 1회만 인터넷이 필요하고, 한
 번도 안 쓰면 파일이 가볍다(아래 「네트워크 정책」).
 
@@ -173,27 +173,32 @@ Grid 컴포넌트를 읽기 전용으로** 쓰므로 정렬·칼럼 필터·열 
 
 ## Markdown 모드
 
-**열기** · 파일 드롭·열기, 붙여넣기(`Ctrl+V` → "붙여넣은 문서 시각" 이름으로 저장) · 왼쪽
-사이드바에 **열람 이력**(최근 20개, IndexedDB — 파일이 아니라 브라우저에 남으므로 붙여넣은
-문서도 다시 찾을 수 있다)
+Milkdown(Crepe) 기반 **WYSIWYG 마크다운 에디터 + 문서 라이브러리**다. 문서는 이 브라우저의
+IndexedDB(`notes-standalone`)에 여러 개 보관되고, 디스크 파일과는 연동하지 않는다(열기·드롭·붙여넣기는
+항상 **가져오기**, 내보내기로 내려받는다). 다른 모드와 달리 모드당 문서 하나가 아니라 사이드바에 목록이 있다.
 
-**읽기** · 헤딩 앵커, 표, 체크박스, 이미지 클릭 시 **라이트박스**(휠로 확대) · 코드블록에 언어
-라벨·**복사** 버튼, ```` ```csv/tsv/json ```` 블록에는 **"CSV로 열기" / "jq로 열기"** · 구문
-강조는 highlight.js를 **첫 코드블록이 화면에 들어올 때** CDN에서 받아 적용하고(미포함 언어는
-언어 팩을 추가로 시도), 색은 앱 토큰에 맞춘 자체 팔레트라 라이트/다크가 그리드와 같은 계열이다 ·
-**Mermaid** 다이어그램과 **KaTeX** 수식도 처음 쓰는 시점에 CDN에서 받아 렌더하며 테마를 바꾸면
-다시 그린다 · 오른쪽 **목차** 패널(현재 위치 강조) · 상단 진행률 바 · 스크롤 위치는 문서마다
-기억된다 · 본문 폭·글자 크기 프리셋(툴바 `T`)
+**가져오기** · 열기(`Ctrl+O`)·드래그앤드롭·붙여넣기 버튼(📋)·다른 모드에서 보내기 — 전부 새 문서로 추가
+(같은 이름은 `이름 (2).md`). `.md` `.txt` `.docx`(pandoc)와 전체 백업 `.zip`을 받는다. md 모드가 활성일
+때는 여러 파일과 백업 zip을 한꺼번에 받고, 다른 모드에서는 첫 파일만 종류별로 라우팅한다.
+**내보내기** · `.md` · `.docx`(서식 템플릿 `.docx`를 골라 보관 가능) · `.rtf` · 전체 문서 백업 `.zip`
 
-**검색** (`Ctrl+F`) · 정규식(`Alt+R`)·대소문자(`Alt+C`)·단어 단위(`Alt+W`), `F3`/`Shift+F3`
-순회, 결과 목록, 오른쪽 가장자리의 **미니맵**에 매치 분포 표시 · CSS Custom Highlight API를 쓰고
-지원하지 않는 브라우저에서는 `<mark>`로 폴백
+**읽기/편집** · 상단 `읽기 | 편집`(`Ctrl+E`). 기존 문서는 항상 읽기 모드로 열어 실수로 바뀌지 않는다.
+편집 중 입력은 400ms 뒤 자동 저장(탭을 숨기거나 닫으면 즉시), `Ctrl+S`는 즉시 저장. 이미지는 문서에
+`idb:` 참조로 두고 Blob으로 보관하며 내보낼 때 Base64로 되돌린다. 슬래시(`/`) 블록 메뉴, 표, 코드블록(구문 강조는 번들된
+CodeMirror 언어 팩)
 
-**편집** · 툴바의 연필로 **분할 편집 모드** — 왼쪽에서 고치면 오른쪽 미리보기가 따라오고 800ms
-뒤 자동 저장된다(저장 상태는 툴바에 표시) · 제목은 툴바에서 바로 고친다 · `.md`로 내보내기
+**표 붙여넣기** · 편집 중 탭 구분(TSV, 2줄 이상)이나 쉼표 구분(CSV, 3줄 이상·열 수 일정)을 붙여넣으면
+**표로 변환**한다. 엑셀·구글 시트처럼 클립보드에 HTML 표가 있으면 에디터 기본 처리에 맡긴다. 변환 전에
+"첫 줄을 머리글로 쓸까요?"를 묻고, 변환 직후 `Ctrl+Z` 한 번이면 붙여넣은 원문 텍스트로 돌아간다.
 
-**이동** · `j`/`k`(또는 `n`/`p`)로 다음/이전 헤딩, `g`/`G`로 맨 위/아래, `Ctrl+K` 커맨드 팰릿에서
-헤딩 이름으로 점프
+**코멘트** · 본문을 선택해 `Ctrl+Alt+M`으로 원문을 바꾸지 않는 메모를 남긴다(읽기 모드에서도 가능).
+사이드바 '코멘트' 탭에서 목록·해결·수정·삭제, 백업 zip에도 포함된다.
+
+**검색** · 문서 안 `Ctrl+F`(정규식·대소문자 옵션) · 파일 이름 필터(한글 초성 지원) · 모든 문서 본문
+`Ctrl+Shift+F`. **버전 이력**(문서당 최근 20개, 복원 가능)은 ⋯ 메뉴의 '이전 버전 보기'.
+
+**보기** · 읽기 모드의 **미니맵**과 이미지 **라이트박스**(휠 확대), ```` ```csv/tsv/json ```` 코드블록에는 CSV·jq
+모드로 보내는 버튼, ⚙ 설정에서 글자 크기·본문 폭. 라이트/다크는 앱 전체 테마(크림 배경·테라코타 강조)를 따른다.
 
 ## 네트워크 정책
 
@@ -201,9 +206,7 @@ Grid 컴포넌트를 읽기 전용으로** 쓰므로 정렬·칼럼 필터·열 
 |---|---|---|
 | 엑셀 파일 열기 · XLSX 내보내기 | SheetJS 0.20.3 (~1MB) | `cdn.sheetjs.com` |
 | jq 쿼리 첫 실행 | jq-web 0.6.2 (`jq.js` + `jq.wasm`) | `cdn.jsdelivr.net` |
-| 마크다운 코드블록 첫 표시 | highlight.js 11.11.1 공통 빌드 (+언어 팩) | `cdnjs.cloudflare.com` |
-| ```` ```mermaid ```` 블록 | Mermaid 11 | `cdn.jsdelivr.net` |
-| `$…$` 수식 | KaTeX 0.16 | `cdn.jsdelivr.net` |
+| `.docx` 가져오기·내보내기 첫 사용 | pandoc-wasm 엔진(약 16MB, 이후 IndexedDB 캐시) | `unpkg.com` |
 
 그 외 외부 요청은 **0건**이다 — 폰트도 로컬에 설치된 것만 쓴다(UI는 Pretendard, 데이터·코드는
 Geist Mono 우선의 모노스페이스 스택, 웹폰트 로드 없음). 아이콘은 인라인 SVG. 부팅만으로는 어떤
@@ -211,8 +214,7 @@ CDN도 받지 않으며, `tests/e2e.mjs`가 **허용 목록 밖 외부 요청 0�
 SheetJS는 XLSX 내보내기 그 한 번**을 감시한다.
 
 이건 명시적인 트레이드오프다: CDN 경로는 그 순간 CDN이 서빙하는 코드를 그대로 실행하므로 빌드
-시점에 고정해 검증한 코드보다 신뢰 경계가 넓다. 인터넷이 없으면 엑셀·jq 실행·코드 강조·Mermaid·
-KaTeX만 안내와 함께 실패하고, CSV/TSV 전 기능과 마크다운 기본 렌더·편집은 완전히 오프라인으로
+시점에 고정해 검증한 코드보다 신뢰 경계가 넓다. 인터넷이 없으면 엑셀·jq 실행·docx 변환만 안내와 함께 실패하고, CSV/TSV 전 기능과 마크다운 편집은 완전히 오프라인으로
 동작한다.
 
 ## 저장소 (브라우저 안)
@@ -255,7 +257,7 @@ src/
   modes/
     csv/CsvMode.svelte  CSV 모드 (툴바 · 그리드 · 편집 연산 · 문서 저장 · 도구 다이얼로그)
     jq/                 jq 모드 — JqMode.svelte, jqState.svelte.ts, panels/ autocomplete/ transform/ core/ utils/ data/ ui/
-    md/                 Markdown 모드 — MdMode.svelte, mdState.svelte.ts, components/ lib/
+    md/                 Markdown 모드 — MdMode.svelte(셸 어댑터), notes/(Milkdown 에디터·문서 라이브러리·코멘트·검색·이력)
   lib/                  모드가 공유하는 것
     parse/    csv.ts detect.ts serialize.ts xlsx.ts(SheetJS CDN 래퍼)
     data/     dataset.svelte.ts view.svelte.ts selection.svelte.ts history.svelte.ts filter.ts find.ts …
@@ -312,7 +314,7 @@ npm run verify     # 타입체크 + 단위 테스트 + 빌드 + E2E + 극단 입
 
 - **`npm run test`** — 460개 단위 테스트. CSV 파서·쿼리 문법·정렬·Op 역연산·직렬화·숨기기 매핑·
   찾기/바꾸기·나누기/결합·문서 저장 레코드, **파일 종류 판정**, jq 토크나이저·JSON 전처리·
-  stringified 필드·CSV 행렬 변환·자동완성 단어 분석, Markdown 이력 DB(LRU·보호·갱신).
+  stringified 필드·CSV 행렬 변환·자동완성 단어 분석, Markdown 표 붙여넣기 변환·코드블록 보내기·미니맵 좌표.
 - **`npm run e2e`** — 330여 개 검사. 실제 Chrome에서 `dist/index.html`을 `file://`로 열어 CSV 전
   기능에 더해 **모드 전환**(상태·스크롤 위치 보존, 비활성 모드 단축키 격리), **파일 종류 자동
   전환**(`.md` `.json` JSON 내용 `.txt` 탭 구분 `.txt`), **도구 간 연결**(CSV→jq, jq→CSV, MD
@@ -329,15 +331,13 @@ E2E는 시스템에 설치된 Chrome을 `puppeteer-core`로 구동한다. 경로
 ## 의존성
 
 Svelte 5 + TypeScript + Vite, `vite-plugin-singlefile`로 단일 파일 번들. 번들에 들어가는 런타임
-의존성은 **`marked`와 `dompurify` 두 개**(마크다운 기본 렌더가 오프라인에서 동작해야 하므로)다.
+Markdown 모드가 쓰는 **Milkdown(Crepe)·CodeMirror 언어 팩·`fflate`·`@lucide/svelte`**와 `pandoc-wasm`(엔진 자체는 CDN)이 들어간다.
 SheetJS(`xlsx`)는 `import type`으로만 참조해 타입 체크에만 쓰고, 실행 코드는 CDN에서 받는다.
-jq-web·highlight.js·Mermaid·KaTeX는 npm 의존성조차 아니다 — URL과 버전이 각 로더 파일에 고정되어
-있다(`src/lib/parse/xlsx.ts`, `src/modes/jq/core/jq-functions.ts`, `src/modes/md/lib/highlight.ts`,
-`src/modes/md/lib/render-extras.ts`).
+jq-web은 npm 의존성조차 아니다 — URL과 버전이 각 로더 파일에 고정되어
+있다(`src/lib/parse/xlsx.ts`, `src/modes/jq/core/jq-functions.ts`).
 
 ## 범위 외
 
-수식/계산 · CSV 다중 시트 동시 편집 · 마크다운 다중 문서 탭 · jq 쿼리 문법 하이라이팅.
+수식/계산 · CSV 다중 시트 동시 편집 · jq 쿼리 문법 하이라이팅.
 
-CSV 문서 저장은 **데이터 + 열 상태**만 담는다. Markdown 편집은 자동 저장이라 "저장되지 않은
-변경" 상태가 800ms 이상 유지되지 않는다(탭에 저장 배지가 없는 것이 정상).
+CSV 문서 저장은 **데이터 + 열 상태**만 담는다. Markdown 편집은 자동 저장(400ms)이라 탭에 저장 배지가 없는 것이 정상이다.

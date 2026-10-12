@@ -1,5 +1,5 @@
 /**
- * docx ↔ 마크다운 변환, md → docx/rtf 내보내기.
+ * docx ↔ 마크다운 변환.
  *
  * pandoc-wasm의 `input-files`는 필수다(실측: 생략하면 stdin을 읽으려다
  * "couldn't unpack docx container: not enough bytes"로 실패한다). `extract-media`를
@@ -9,9 +9,6 @@
  */
 import referenceUrl from './reference.docx?url'
 import { runPandoc } from './client'
-import { markdownToPlainHtml } from '../../modes/md/lib/markdown'
-
-export type ExportFormat = 'docx' | 'rtf'
 
 export interface DocxImportResult {
   markdown: string
@@ -80,15 +77,11 @@ export function buildDocxImportOptions(): Record<string, unknown> {
   return { from: 'docx', to: 'gfm', wrap: 'none', 'input-files': ['in.docx'], 'extract-media': 'media' }
 }
 
-export function buildRtfExportOptions(): Record<string, unknown> {
-  return { from: 'html', to: 'rtf', standalone: true, 'input-files': ['in.html'], 'output-file': 'out.rtf' }
-}
-
 export function buildDocxExportOptions(): Record<string, unknown> {
   return {
-    from: 'html',
+    from: 'gfm',
     to: 'docx',
-    'input-files': ['in.html'],
+    'input-files': ['in.md'],
     'reference-doc': 'reference.docx',
     'output-file': 'out.docx',
   }
@@ -101,41 +94,47 @@ export async function docxToMarkdown(file: File): Promise<DocxImportResult> {
   return { markdown, warningCount: result.warnings.length, skippedImageCount }
 }
 
-// ── 내보내기: markdown → docx/rtf ────────────────────────────────────────────
-let referenceDocxPromise: Promise<Blob> | null = null
+// ── 내보내기: markdown → docx ────────────────────────────────────────────────
+let defaultTemplatePromise: Promise<Blob> | null = null
 
-/** 번들에 인라인된 사내 템플릿(reference.docx)을 Blob으로 가져온다. */
-function getReferenceDocx(): Promise<Blob> {
-  if (!referenceDocxPromise) {
-    referenceDocxPromise = fetch(referenceUrl).then((r) => r.blob())
-    referenceDocxPromise.catch(() => {
-      referenceDocxPromise = null
+/** 번들에 인라인된 기본 템플릿(workbench 와 동일한 reference.docx)을 Blob 으로 가져온다. */
+export function getDefaultTemplate(): Promise<Blob> {
+  if (!defaultTemplatePromise) {
+    defaultTemplatePromise = fetch(referenceUrl).then((r) => r.blob())
+    defaultTemplatePromise.catch(() => {
+      defaultTemplatePromise = null
     })
   }
-  return referenceDocxPromise
+  return defaultTemplatePromise
 }
 
-export async function exportDocument(markdown: string, format: ExportFormat): Promise<ExportResult> {
-  const html = markdownToPlainHtml(markdown)
-
-  if (format === 'rtf') {
-    // pandoc의 RTF writer는 reference-doc을 지원하지 않는다 — 템플릿은 docx에만 적용된다
-    const result = await runPandoc(buildRtfExportOptions(), { 'in.html': html })
-    const blob = result.files['out.rtf']
-    if (!blob) throw new Error('RTF 변환 결과가 비어 있습니다')
-    return { blob, warningCount: result.warnings.length }
-  }
-
-  const reference = await getReferenceDocx()
-  const result = await runPandoc(buildDocxExportOptions(), { 'in.html': html, 'reference.docx': reference })
+/**
+ * markdown → docx. 이미지는 호출자가 미리 data URI 로 바꿔 넘겨야 한다(pandoc-wasm 에는 파일 시스템이 없다).
+ * template 이 없으면 기본 템플릿을 쓴다.
+ */
+export async function markdownToDocx(markdown: string, template?: Blob | null): Promise<ExportResult> {
+  const reference = template ?? (await getDefaultTemplate())
+  const result = await runPandoc(buildDocxExportOptions(), { 'in.md': markdown, 'reference.docx': reference })
   const blob = result.files['out.docx']
   if (!blob) throw new Error('DOCX 변환 결과가 비어 있습니다')
   return { blob, warningCount: result.warnings.length }
 }
 
+export function buildRtfExportOptions(): Record<string, unknown> {
+  return { from: 'gfm', to: 'rtf', standalone: true, 'input-files': ['in.md'], 'output-file': 'out.rtf' }
+}
+
+/** markdown → rtf. RTF writer 는 reference-doc 을 지원하지 않아 템플릿은 적용되지 않는다. 이미지는 data URI 로 미리 바꿔 넘긴다. */
+export async function markdownToRtf(markdown: string): Promise<ExportResult> {
+  const result = await runPandoc(buildRtfExportOptions(), { 'in.md': markdown })
+  const blob = result.files['out.rtf']
+  if (!blob) throw new Error('RTF 변환 결과가 비어 있습니다')
+  return { blob, warningCount: result.warnings.length }
+}
+
 // ── 파일명 ───────────────────────────────────────────────────────────────────
 /** 확장자를 바꾼다. 확장자가 없어도(`보고서`) 그대로 붙인다. */
-export function swapExt(name: string, ext: ExportFormat | 'md'): string {
+export function swapExt(name: string, ext: 'docx' | 'rtf' | 'md'): string {
   const i = name.lastIndexOf('.')
   const base = i < 0 ? name : name.slice(0, i)
   return `${base || name}.${ext}`

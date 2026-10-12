@@ -286,7 +286,7 @@
   .dlg-btn.primary {
     background: var(--dlg-accent);
     border-color: var(--dlg-accent);
-    color: #fff;
+    color: var(--on-fill, #fff);
     font-weight: 600;
   }
   .dlg-btn.primary:hover {

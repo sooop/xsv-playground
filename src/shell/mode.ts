@@ -24,6 +24,8 @@ export type ModePayload =
 /** `bind:this`로 얻는 모드 인스턴스의 표면. 모드 컴포넌트가 `export function`으로 구현한다. */
 export interface ModeHandle {
   openFile(file: File): Promise<void>
+  /** 여러 파일을 한꺼번에 받는 모드(Markdown 라이브러리)만 구현한다. 활성 모드일 때 셸이 쓴다. */
+  openFiles?(files: File[]): Promise<void>
   openText(text: string, name: string): Promise<void>
   /** 다른 모드에서 보낸 데이터 수신. 셸이 덮어쓰기 확인을 마친 뒤 호출한다. */
   receive(p: ModePayload): Promise<void>
