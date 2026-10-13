@@ -16,6 +16,8 @@
   import FindBar from './notes/components/FindBar.svelte';
   import Minimap from './notes/components/Minimap.svelte';
   import Lightbox from './notes/components/Lightbox.svelte';
+  import TableViewer from './notes/components/TableViewer.svelte';
+  import { docBaseName, exportTablesXlsx, openTablesInCsv, sendTableToCsv, tableViewer } from './notes/tableActions.svelte';
   import SearchPanel from './notes/components/SearchPanel.svelte';
   import Search from '@lucide/svelte/icons/search';
   import X from '@lucide/svelte/icons/x';
@@ -27,7 +29,7 @@
   import Pencil from '@lucide/svelte/icons/pencil';
   import Trash2 from '@lucide/svelte/icons/trash-2';
   import PanelLeft from '@lucide/svelte/icons/panel-left';
-  import { doc } from './notes/store.svelte';
+  import { applyLayout, doc, editorBridge } from './notes/store.svelte';
   import {
     lib, init, save, flush, exportMd, exportAll, openPicker, openDoc, createDoc, renameDoc, removeDoc, onEditorChange,
     upload, resolveUrl, importFiles, createFromText, exportDocxCurrent, exportRtfCurrent, tpl, pickTemplate, clearTemplate, restoreVersion, searchLibrary,
@@ -45,6 +47,7 @@
   let wrapEl = $state<HTMLElement | null>(null);
 
   let pasteOpen = $state(false);
+  let tableCount = $state(0); // ⋯ 메뉴를 열 때 갱신하는 문서 안 표 개수
   let sidebarOpen = $state(true);
   let historyOpen = $state(false);
 
@@ -55,7 +58,8 @@
 
   const visibleDocs = $derived(lib.filter.trim() ? lib.docs.filter((d) => matchName(stripExt(d.name), lib.filter)) : lib.docs);
 
-  onMount(() => { void init(); });
+  // 저장된 글자 크기·본문 폭을 시작할 때 CSS 변수로 반영한다(설정 팝오버를 건드릴 때만 적용되면 새로고침 뒤 설정이 풀린 것처럼 보인다)
+  onMount(() => { applyLayout(); void init(); });
 
   // ── 셸 계약(ModeHandle) ──
   export async function openFile(file: File): Promise<void> { await importFiles([file]); }
@@ -72,6 +76,7 @@
   }
 
   export async function receive(p: ModePayload): Promise<void> {
+    if (p.kind === 'file') { await openFile(p.file); return; }
     const stem = p.name.replace(/\.[^./\\]+$/, '') || '새 문서';
     if (p.kind === 'table') { await createFromText(stem, tableToMarkdown(p.header, p.rows)); return; }
     const ext = /\.([^./\\]+)$/.exec(p.name)?.[1]?.toLowerCase() ?? '';
@@ -186,6 +191,11 @@
           options={templateOptions}
           selected={tpl.name ? 'custom' : ''}
           onSelect={(id) => { if (id === '') void clearTemplate(); }}
+          onOpen={() => (tableCount = editorBridge.getTables().length)}
+          tableActions={tableCount ? [
+            { label: `모든 표를 xlsx 시트로 저장 (${tableCount}개)`, run: () => void exportTablesXlsx(editorBridge.getTables()) },
+            { label: `모든 표를 CSV 모드로 열기 (${tableCount}개)`, run: () => void openTablesInCsv(editorBridge.getTables()) },
+          ] : []}
           actions={[{ label: '템플릿 .docx 파일 선택…', run: pickTemplate }]}
           hint="템플릿은 이 브라우저에 보관됩니다. 첫 docx 사용 때 pandoc 엔진(약 16MB)을 내려받습니다."
         />
@@ -205,9 +215,13 @@
       {/if}
     </section>
     <Minimap wrap={wrapEl} editing={doc.edit} />
-    <Lightbox root={wrapEl} enabled={!doc.edit} />
+    <Lightbox root={wrapEl} readMode={!doc.edit} />
   </main>
 </div>
+
+{#if tableViewer.table}
+  <TableViewer table={tableViewer.table} docName={docBaseName()} onClose={() => (tableViewer.table = null)} onSendToCsv={(t) => void sendTableToCsv(t)} />
+{/if}
 
 <StatusLine />
 <PasteModal open={pasteOpen} onClose={() => (pasteOpen = false)} onCreate={createFromText} />

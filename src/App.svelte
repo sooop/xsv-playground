@@ -7,6 +7,7 @@
   import CsvMode from './modes/csv/CsvMode.svelte'
   import JqMode from './modes/jq/JqMode.svelte'
   import MdMode from './modes/md/MdMode.svelte'
+  import { isImageDrag } from './shell/dragKind'
   import { OPEN_ACCEPT } from './shell/fileKind'
   import type { ModeId } from './shell/mode'
   import ModeTabs from './shell/ModeTabs.svelte'
@@ -49,8 +50,20 @@
    * 그렇지 않으면 같은 파일이 두 번 열린다.
    */
   let dragDepth = $state(0)
+  /**
+   * 문서가 열린 Markdown 모드에서 끄는 이미지는 "열 파일"이 아니라 본문에 끼워 넣을 것이다(에디터가 받는다).
+   * 모드 화면 밖(탭바 등)에 놓였을 때 "파일을 엽니다" 오버레이가 거짓말하거나 거부 알림이 뜨지 않게 조용히 흘려보낸다.
+   */
+  const imageForMarkdown = (e: DragEvent) =>
+    // Markdown 모드는 hasDocument 를 항상 false 로 두므로(문서가 라이브러리에 있다) 열린 문서는 label 로 안다
+    shell.active === 'md' && shell.status.md.label !== '' && isImageDrag(e.dataTransfer)
   function onWindowDragOver(e: DragEvent): void {
     if (e.defaultPrevented) {
+      dragDepth = 0
+      return
+    }
+    if (imageForMarkdown(e)) {
+      e.preventDefault()
       dragDepth = 0
       return
     }
@@ -62,6 +75,10 @@
   function onWindowDrop(e: DragEvent): void {
     dragDepth = 0
     if (e.defaultPrevented) return
+    if (imageForMarkdown(e)) {
+      e.preventDefault() // 브라우저가 이미지를 새 탭으로 열지 않게만 막는다
+      return
+    }
     const files = e.dataTransfer?.files
     if (files?.length) {
       e.preventDefault()

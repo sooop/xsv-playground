@@ -122,6 +122,10 @@
    * 않는다** — 그대로 입력에 앉힌다(`openText` 와 달리 추출 확인 대화상자를 띄우지 않는다).
    */
   export async function receive(p: ModePayload): Promise<void> {
+    if (p.kind === 'file') {
+      await openFile(p.file)
+      return
+    }
     if (p.kind === 'text') {
       jq.setInput(p.text, p.name || null)
     } else {

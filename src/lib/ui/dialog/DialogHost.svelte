@@ -148,6 +148,9 @@
           {('cancelLabel' in req.opts && req.opts.cancelLabel) || '취소'}
         </button>
       {/if}
+      {#if req.kind === 'confirm' && 'altLabel' in req.opts && req.opts.altLabel}
+        <button class="dlg-btn" onclick={() => dialogs.settle(req!.id, 'alt')}>{req.opts.altLabel}</button>
+      {/if}
       <button class="dlg-btn primary" bind:this={okEl} onclick={accept}>
         {req.opts.okLabel ?? (req.kind === 'alert' ? '확인' : '확인')}
       </button>

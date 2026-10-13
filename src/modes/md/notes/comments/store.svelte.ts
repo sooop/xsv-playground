@@ -113,7 +113,7 @@ export function bindComments(view: EditorView, docKey: string): () => void {
   const onSelChange = () => {
     const s = window.getSelection();
     if (s && !s.isCollapsed && view.dom.contains(s.anchorNode)) return;
-    if (cm.sel && !document.activeElement?.closest?.('.cm-layer')) cm.sel = null;
+    if (cm.sel && !document.activeElement?.closest?.('.cmt-layer')) cm.sel = null;
   };
   document.addEventListener('selectionchange', onSelChange);
 

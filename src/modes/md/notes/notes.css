@@ -65,12 +65,12 @@
   --crepe-font-code: var(--font-code);
   --crepe-shadow-1: var(--shadow);
   --crepe-shadow-2: var(--shadow);
-  --crepe-base-font-size: var(--editor-font-size, 16px);
+  --crepe-base-font-size: var(--editor-font-size, 15px);
   background: var(--bg);
 }
 .milkdown .ProseMirror {
   padding: 40px 48px 120px;
-  max-width: var(--editor-width, 860px);
+  max-width: var(--editor-width, 980px);
   margin: 0 auto;
 }
 & button, & input, & select { font: inherit; color: inherit; }
@@ -353,6 +353,14 @@
 
 /* Crepe 는 코드 블록 placeholder 에만 코드 폰트를 지정하므로 CodeMirror 에디터에도 적용한다 */
 .milkdown .milkdown-code-block .cm-editor .cm-scroller { font-family: var(--font-code); }
+/* 코드 블록 글자는 본문보다 작게(기본 0.875배 → 0.8배) */
+.milkdown .milkdown-code-block .cm-editor,
+.milkdown .milkdown-code-block .milkdown-code-block-placeholder { font-size: calc(var(--crepe-base-font-size, 16px) * 0.834); }
+/* 줄 간격: CodeMirror 기본(1.4)이 촘촘해서 넓힌다 */
+.milkdown .milkdown-code-block .cm-editor .cm-scroller { line-height: 1.65; }
+/* basicSetup 의 현재 행 하이라이트 끄기 (Crepe 가 extensions 에서 빼는 옵션을 주지 않아 CSS 로 무력화) */
+.milkdown .milkdown-code-block .cm-editor .cm-activeLine,
+.milkdown .milkdown-code-block .cm-editor .cm-activeLineGutter { background-color: transparent !important; }
 
 /* 제목 크기: Crepe 기본(h1 2.625em ~ h3 2em)이 본문 대비 과해서 줄인다. em 이라 글자 크기 설정을 따른다 */
 .milkdown .ProseMirror h1 { font-size: 1.75em; font-weight: 700; line-height: 1.3; margin-top: 28px; margin-bottom: 12px; }
@@ -369,8 +377,14 @@
 .milkdown .ProseMirror blockquote { margin: 16px 0; padding-top: 2px; padding-bottom: 2px; }
 .milkdown .ProseMirror hr { margin: 20px 0; }
 .milkdown .milkdown-table-block { margin: 16px 0; }
+/* 표: 셀 여백·글자를 줄여 정보 밀도를 높인다 */
+.milkdown .milkdown-table-block { font-size: 0.9em; }
+/* 열 너비: ProseMirror 기본(table-layout: fixed)은 1/N 균등 분배라서, 내용 길이에 따라 나누는 auto 로 바꾼다 */
+.milkdown .milkdown-table-block table { table-layout: auto; }
 .milkdown .milkdown-table-block th,
-.milkdown .milkdown-table-block td { padding: 8px 16px; }
+.milkdown .milkdown-table-block td { padding: 4px 10px; line-height: 1.45; }
+.milkdown .milkdown-table-block th p,
+.milkdown .milkdown-table-block td p { padding: 0; margin: 0; }
 .milkdown .milkdown-code-block { margin: 16px 0; padding-top: 12px; }
 .milkdown .milkdown-image-block { margin: 16px 0; }
 
@@ -464,13 +478,13 @@
 .modetoggle { display: inline-flex; align-items: center; gap: 4px; min-width: 84px; justify-content: center; }
 .modetoggle.active { background: var(--accent-soft); border-color: var(--accent); }
 
-.cm-layer { position: fixed; z-index: 40; }
+.cmt-layer { position: fixed; z-index: 40; }
 .cm-add { display: inline-flex; align-items: center; gap: 4px; box-shadow: var(--shadow); border-color: var(--comment); }
 .cm-pop {
   width: 320px; max-height: min(60vh, 480px); overflow: auto; display: flex; flex-direction: column; gap: 8px;
   background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: var(--shadow); padding: 10px;
 }
-.cm-layer textarea, .cm-item textarea {
+.cmt-layer textarea, .cm-item textarea {
   width: 100%; box-sizing: border-box; resize: vertical; font: inherit; font-size: 13px; padding: 6px 8px;
   background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); border-radius: 6px;
 }
@@ -499,3 +513,18 @@
 }
 
 @keyframes md-notes-spin { to { transform: rotate(360deg); } }
+/* ---- 표 → CSV/TSV 호버 툴바·우클릭 메뉴 (body 에 붙으므로 에디터 밖 스타일) ---- */
+.tbl-tools, .tbl-menu {
+  position: fixed; z-index: 45; display: flex; gap: 2px; align-items: center;
+  background: var(--bg); border: 1px solid var(--border-strong); border-radius: 8px;
+  box-shadow: var(--shadow); padding: 3px; font-size: 12.5px; color: var(--text);
+}
+.tbl-tools[hidden], .tbl-menu[hidden] { display: none; }
+.tbl-menu { flex-direction: column; align-items: stretch; min-width: 160px; padding: 4px; font-size: 13px; }
+.tbl-tools button, .tbl-menu button {
+  border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer;
+  padding: 4px 8px; border-radius: 5px; text-align: left; white-space: nowrap;
+}
+.tbl-tools button:hover, .tbl-menu button:hover { background: var(--hover); }
+.tbl-hdr { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; cursor: pointer; border-left: 1px solid var(--border); margin-left: 2px; white-space: nowrap; }
+.tbl-hdr input { accent-color: var(--primary); }

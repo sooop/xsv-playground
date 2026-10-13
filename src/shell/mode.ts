@@ -20,6 +20,8 @@ export const MODE_LABEL: Record<ModeId, string> = {
 export type ModePayload =
   | { kind: 'table'; header: string[]; rows: string[][]; name: string; from: ModeId }
   | { kind: 'text'; text: string; name: string; from: ModeId }
+  /** 파일 그대로(여러 시트가 든 xlsx 등) — 받는 모드가 열기 경로로 처리한다 */
+  | { kind: 'file'; file: File; name: string; from: ModeId }
 
 /** `bind:this`로 얻는 모드 인스턴스의 표면. 모드 컴포넌트가 `export function`으로 구현한다. */
 export interface ModeHandle {
@@ -30,6 +32,11 @@ export interface ModeHandle {
   /** 다른 모드에서 보낸 데이터 수신. 셸이 덮어쓰기 확인을 마친 뒤 호출한다. */
   receive(p: ModePayload): Promise<void>
   focusMode(): void
+  /**
+   * 열려 있는 문서를 저장한다(저장 기능이 있는 모드만 구현). 실제로 저장됐으면 true —
+   * 이름 입력을 취소했거나 저장에 실패했으면 false.
+   */
+  saveCurrent?(): Promise<boolean>
   /**
    * 모드 단축키. 셸이 캡처 단계에서 잡아 **활성 모드에만, 다이얼로그가 없을 때만** 넘긴다.
    * 처리했으면 true(이미 preventDefault/stopPropagation을 했어야 한다).

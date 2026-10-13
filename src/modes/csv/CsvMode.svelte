@@ -1502,6 +1502,10 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
   }
 
   export async function receive(p: ModePayload): Promise<void> {
+    if (p.kind === 'file') {
+      await openFile(p.file)
+      return
+    }
     if (p.kind === 'text') {
       await openText(p.text, p.name)
       return
@@ -1514,6 +1518,12 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
     workbook = null
     await applyParsed(result, p.name)
     toast(`${num(result.rows.length)}행 × ${result.width}열`, 'ok')
+  }
+
+  /** 셸이 "저장 후 바꾸기"에서 부른다 — 실제로 저장됐으면 true. */
+  export async function saveCurrent(): Promise<boolean> {
+    await saveDoc({ rename: false })
+    return currentDoc !== null && !docDirty
   }
 
   export function focusMode(): void {

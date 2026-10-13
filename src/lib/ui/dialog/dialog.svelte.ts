@@ -37,6 +37,11 @@ export interface ConfirmOptions extends AlertOptions {
   danger?: boolean
 }
 
+/** 확인·취소 사이에 선택지를 하나 더 둔 확인창 — okLabel 이 주(primary) 선택, altLabel 이 보조 선택 */
+export interface ChooseOptions extends ConfirmOptions {
+  altLabel: string
+}
+
 export interface PromptOptions extends ConfirmOptions {
   value?: string
   placeholder?: string
@@ -51,7 +56,7 @@ interface BaseRequest {
 export type DialogRequest = BaseRequest &
   (
     | { kind: 'alert'; opts: AlertOptions; settle: (v: undefined) => void }
-    | { kind: 'confirm'; opts: ConfirmOptions; settle: (v: boolean) => void }
+    | { kind: 'confirm'; opts: ConfirmOptions; settle: (v: boolean | 'alt') => void }
     | { kind: 'prompt'; opts: PromptOptions; settle: (v: string | null) => void }
   )
 
@@ -79,7 +84,19 @@ class DialogController {
 
   confirm(opts: ConfirmOptions): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
-      this.#push({ id: ++this.#seq, kind: 'confirm', opts, settle: resolve })
+      this.#push({ id: ++this.#seq, kind: 'confirm', opts, settle: (v) => resolve(v === true) })
+    })
+  }
+
+  /** 'ok' = 주 선택, 'alt' = 보조 선택, null = 취소 */
+  choose(opts: ChooseOptions): Promise<'ok' | 'alt' | null> {
+    return new Promise((resolve) => {
+      this.#push({
+        id: ++this.#seq,
+        kind: 'confirm',
+        opts,
+        settle: (v) => resolve(v === 'alt' ? 'alt' : v ? 'ok' : null),
+      })
     })
   }
 
@@ -106,7 +123,7 @@ class DialogController {
         req.settle(undefined)
         break
       case 'confirm':
-        req.settle(value === true)
+        req.settle(value === 'alt' ? 'alt' : value === true)
         break
       case 'prompt':
         req.settle(typeof value === 'string' ? value : null)

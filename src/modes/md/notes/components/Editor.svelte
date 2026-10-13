@@ -19,6 +19,9 @@
   import { onlyDoubleTilde } from '../gfmTilde';
   import { pasteTable } from '../pasteTablePlugin';
   import { attachCodeSend } from '../codeSend';
+  import { attachImageDrop } from '../imageDrop';
+  import { tableEnv } from '../tableActions.svelte';
+  import { attachTableTools, collectTables } from '../tableTools';
 
   interface Props {
     initial: string;
@@ -45,6 +48,8 @@
     let ctl: ReturnType<typeof attachFinder> | undefined;
     let unbind: (() => void) | undefined;
     let unsend: (() => void) | undefined;
+    let untable: (() => void) | undefined;
+    let undrop: (() => void) | undefined;
     let disposed = false;
     untrack(() => {
       const c = new CrepeBuilder({ root: host, defaultValue: initial })
@@ -81,6 +86,9 @@
             finder.ctl = ctl;
             unbind = bindComments(view, doc.path);
             unsend = attachCodeSend(host, view);
+            editorBridge.getTables = () => collectTables(view);
+            undrop = attachImageDrop((host.closest('.mode-pane') as HTMLElement | null) ?? host, view); // 본문 밖(여백·아래 빈 공간·툴바·사이드바)에 놓은 이미지도 받는다
+            untable = attachTableTools(view, tableEnv); // 표 확대 보기·복사·저장·CSV 모드로 보내기
           }
         }
       });
@@ -91,6 +99,8 @@
       builder = undefined;
       unbind?.();
       unsend?.();
+      untable?.();
+      undrop?.();
       if (ctl) {
         ctl.destroy();
         if (finder.ctl === ctl) { finder.ctl = null; finder.total = 0; finder.current = -1; finder.error = ''; }

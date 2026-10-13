@@ -1,19 +1,31 @@
 // Markdown 모드 상태: 설정, 현재 문서, 진행 표시. 테마는 셸(themeCtl)이 맡는다.
 import { dialogs } from '../../../lib/ui/dialog/dialog.svelte';
 import { toasts } from '../../../lib/ui/toasts.svelte';
+import type { TableData } from './tableTools';
 
 const SETTINGS_KEY = 'notes.settings';
-const SETTINGS_VERSION = 2;
+const SETTINGS_VERSION = 3;
+
+/** 기본값 — 설정 팝오버의 "초기화"와 전체 폭 해제도 이 값을 쓴다 */
+export const DEFAULT_FONT_SIZE = 15; // 에디터 기본 글자 크기(px)
+export const DEFAULT_CONTENT_WIDTH = 980; // 본문 최대 폭(px), 0 이면 전체 폭
+/** 기본값이 바뀌기 전(v2 이하)의 기본값 — 저장돼 있어도 사용자가 고른 값이 아니므로 새 기본값으로 옮긴다 */
+const LEGACY_DEFAULTS = { fontSize: 16, contentWidth: 860 };
 
 function loadSettings() {
   const base = {
-    fontSize: 16, // 에디터 기본 글자 크기(px)
-    contentWidth: 860, // 본문 최대 폭(px), 0 이면 전체 폭
+    fontSize: DEFAULT_FONT_SIZE,
+    contentWidth: DEFAULT_CONTENT_WIDTH,
     version: SETTINGS_VERSION,
   };
   try {
     const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}');
-    const merged = { ...base, ...stored };
+    if (stored.version !== SETTINGS_VERSION) {
+      // 옛 기본값 그대로인 항목만 버리고(직접 바꾼 값은 유지) 새 기본값을 받는다
+      if (stored.fontSize === LEGACY_DEFAULTS.fontSize) delete stored.fontSize;
+      if (stored.contentWidth === LEGACY_DEFAULTS.contentWidth) delete stored.contentWidth;
+    }
+    const merged = { ...base, ...stored, version: SETTINGS_VERSION };
     if (stored.version !== SETTINGS_VERSION) localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged));
     return merged;
   } catch {
@@ -34,7 +46,7 @@ export const WIDTH_RANGE = { min: 480, max: 1600 };
 
 // 글자 크기와 본문 폭을 CSS 변수로 반영한다
 export function applyLayout() {
-  const f = Math.min(FONT_RANGE.max, Math.max(FONT_RANGE.min, Number(settings.fontSize) || 16));
+  const f = Math.min(FONT_RANGE.max, Math.max(FONT_RANGE.min, Number(settings.fontSize) || DEFAULT_FONT_SIZE));
   const w = Number(settings.contentWidth) || 0;
   const root = document.documentElement.style;
   root.setProperty('--editor-font-size', `${f}px`);
@@ -52,7 +64,10 @@ export const doc = $state({
 });
 
 // 마지막 에디터 내용을 외부에서 읽기 위한 훅 (Editor 가 등록)
-export const editorBridge: { getMarkdown: () => string } = { getMarkdown: () => doc.content };
+export const editorBridge: { getMarkdown: () => string; getTables: () => TableData[] } = {
+  getMarkdown: () => doc.content,
+  getTables: () => [],
+};
 
 // ---- 진행 상태 (pandoc 엔진 준비/변환 등 시간이 걸리는 작업) ----
 export const status = $state({ text: '' });

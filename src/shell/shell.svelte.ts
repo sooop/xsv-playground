@@ -83,7 +83,20 @@ class ShellController {
    * 전달이 끝나면 그 모드로 전환한다. 취소하면 false.
    */
   async sendTo(to: ModeId, p: ModePayload): Promise<boolean> {
-    if (this.status[to].hasDocument) {
+    const st = this.status[to]
+    const saver = this.handles[to]?.saveCurrent
+    // 저장 기능이 있는 모드에서 저장 문서가 아니거나(label 없음) 수정된 문서를 덮어쓰게 되면 "저장 후 바꾸기"를 권한다
+    if (st.hasDocument && saver && (st.isDirty || st.label === '')) {
+      const pick = await dialogs.choose({
+        title: `${MODE_LABEL[to]} 모드로 보내기`,
+        message: `${MODE_LABEL[to]} 모드에 열려 있는 문서를 닫고 이 데이터로 바꿀까요?`,
+        detail: st.isDirty ? '저장되지 않은 변경이 있습니다.' : '이 문서는 저장된 문서가 아닙니다.',
+        okLabel: '저장 후 바꾸기',
+        altLabel: '저장 안 하고 바꾸기',
+      })
+      if (pick === null) return false
+      if (pick === 'ok' && !(await saver.call(this.handles[to]))) return false
+    } else if (st.hasDocument) {
       const ok = await dialogs.confirm({
         title: `${MODE_LABEL[to]} 모드로 보내기`,
         message: `${MODE_LABEL[to]} 모드에 열려 있는 문서를 닫고 이 데이터로 바꿀까요?`,

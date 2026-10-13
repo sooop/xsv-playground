@@ -16,8 +16,10 @@
     onOpen?: () => void;
     hint?: string;
     actions?: { label: string; run: () => void }[];
+    /** 문서의 표 내보내기 항목(없으면 "표" 구역을 숨긴다) */
+    tableActions?: { label: string; run: () => void }[];
   }
-  let { onHistory, onDocx, onRtf, onMd, onImages, options, selected, onSelect, onOpen, hint = '', actions = [] }: Props = $props();
+  let { onHistory, onDocx, onRtf, onMd, onImages, options, selected, onSelect, onOpen, hint = '', actions = [], tableActions = [] }: Props = $props();
 
   let open = $state(false);
 
@@ -51,6 +53,13 @@
       {#if onMd}<button role="menuitem" onclick={() => run(onMd)}>.md 파일로 내려받기</button>{/if}
       <button role="menuitem" onclick={() => run(onDocx)}>.docx 로 내보내기</button>
       {#if onRtf}<button role="menuitem" onclick={() => run(onRtf)}>.rtf 로 내보내기</button>{/if}
+      {#if tableActions.length}
+        <hr />
+        <span class="label">표</span>
+        {#each tableActions as a (a.label)}
+          <button role="menuitem" onclick={() => run(a.run)}>{a.label}</button>
+        {/each}
+      {/if}
       <hr />
       <span class="label">DOCX 서식 템플릿</span>
       {#each options as o (o.id)}

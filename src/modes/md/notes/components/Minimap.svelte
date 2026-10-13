@@ -1,5 +1,6 @@
 <script lang="ts">
   // 문서 전체를 세로로 축소해 보여주는 미니맵. 스크롤 요소(.editor-wrap)의 오른쪽 끝에 fixed 로 붙는다.
+  import { untrack } from 'svelte';
   import { layoutBars, thumbBox, scrollTopForPointer, kindOf, type Bar, type BlockBox } from '../minimap';
 
   interface Props {
@@ -83,7 +84,8 @@
     mo.observe(el, { childList: true, subtree: true, characterData: true });
     window.addEventListener('resize', schedule);
     observePm();
-    rebuild();
+    // rebuild 는 visible·box·bars 를 읽고 쓰므로 effect 의 의존성으로 잡히면 스스로를 무한히 다시 실행한다
+    untrack(rebuild);
     return () => {
       clearTimeout(timer);
       if (raf) cancelAnimationFrame(raf);
