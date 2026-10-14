@@ -3,7 +3,7 @@
 ## Context
 jq-playground 자동완성의 구문 분석 로직(PipeAnalyzer, QueryPanel)이 ad-hoc 패턴 매칭의 누적으로 복잡한 jq 문법에서 오작동한다. 현재 버그와 잠재적 오류를 문서화하고, 경량 jq 토크나이저 기반 리팩터링 방향을 제시한다.
 
-**핵심 제약**: 싱글파일 빌드(`dist/index.html`) 유지 필수 — 추가 .wasm 파일 불가
+**핵심 제약**: 싱글파일 빌드(`dist/workbench.html`) 유지 필수 — 추가 .wasm 파일 불가
 
 ## 작업 1: 분석 문서 작성
 

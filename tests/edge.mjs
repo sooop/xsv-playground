@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 극단 입력 검증 — 실제 Chrome에서 `dist/index.html`을 열고 까다로운 파일을 먹여 본다.
+ * 극단 입력 검증 — 실제 Chrome에서 `dist/workbench.html`을 열고 까다로운 파일을 먹여 본다.
  *
  *   npm run build && node tests/edge.mjs
  *
@@ -16,7 +16,7 @@ import puppeteer from 'puppeteer-core'
 import * as XLSX from 'xlsx'
 
 const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
-const DIST = resolve('dist/index.html')
+const DIST = resolve('dist/workbench.html')
 const TMP = resolve('.edge-tmp')
 if (!existsSync(TMP)) mkdirSync(TMP, { recursive: true })
 

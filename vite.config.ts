@@ -1,10 +1,22 @@
+import { renameSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 import { viteSingleFile } from 'vite-plugin-singlefile'
 
+/** 빌드 산출물 이름을 index.html 대신 workbench.html로 바꾼다. */
+const renameOutput = (): Plugin => ({
+  name: 'rename-output',
+  apply: 'build',
+  closeBundle() {
+    const from = fileURLToPath(new URL('./dist/index.html', import.meta.url))
+    const to = fileURLToPath(new URL('./dist/workbench.html', import.meta.url))
+    if (existsSync(from)) renameSync(from, to)
+  },
+})
+
 export default defineConfig({
-  plugins: [svelte(), viteSingleFile({ removeViteModuleLoader: true })],
+  plugins: [svelte(), viteSingleFile({ removeViteModuleLoader: true }), renameOutput()],
   resolve: {
     alias: {
       // pandoc-wasm의 `exports` 필드는 하위 경로 import를 막고, 브라우저 진입점(index.browser.js)은

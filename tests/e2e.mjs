@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 빌드 산출물(dist/index.html)을 실제 Chrome에서 `file://`로 열어 검증한다.
+ * 빌드 산출물(dist/workbench.html)을 실제 Chrome에서 `file://`로 열어 검증한다.
  *
  *   npm run build && node tests/e2e.mjs [--headful] [--shots]
  *
@@ -14,14 +14,14 @@ import { pathToFileURL } from 'node:url'
 import puppeteer from 'puppeteer-core'
 
 const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
-const DIST = resolve('dist/index.html')
+const DIST = resolve('dist/workbench.html')
 const FIXTURE = resolve('fixtures/big.csv')
 const SHOTS = resolve('.e2e-shots')
 const headful = process.argv.includes('--headful')
 const wantShots = process.argv.includes('--shots')
 
 if (!existsSync(DIST)) {
-  console.error('dist/index.html이 없습니다. npm run build 를 먼저 실행하세요.')
+  console.error('dist/workbench.html이 없습니다. npm run build 를 먼저 실행하세요.')
   process.exit(1)
 }
 if (wantShots && !existsSync(SHOTS)) mkdirSync(SHOTS, { recursive: true })

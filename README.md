@@ -1,7 +1,7 @@
 # xsv-playground — 단일 HTML CSV · jq · Markdown 워크벤치
 
 큰 CSV/TSV/XLSX를 훑고 잘라내는 **CSV 모드**, JSON에 jq 쿼리를 걸어 보는 **jq 모드**, 마크다운을
-읽고 고치는 **Markdown 모드** — 세 도구가 **`dist/index.html` 파일 하나**에 들어 있고, 더블클릭해서
+읽고 고치는 **Markdown 모드** — 세 도구가 **`dist/workbench.html` 파일 하나**에 들어 있고, 더블클릭해서
 열면 그대로 동작한다. 데이터는 브라우저 밖으로 나가지 않는다.
 
 CSV/TSV를 다루는 모든 기능은 외부 네트워크 요청이 **0건**이라 오프라인·사내 폐쇄망에 파일 하나만
@@ -12,7 +12,7 @@ CSV/TSV를 다루는 모든 기능은 외부 네트워크 요청이 **0건**이�
 ```
 npm install
 npm run dev            # 개발 서버
-npm run build          # → dist/index.html (약 600KB, gzip 186KB, 단일 파일)
+npm run build          # → dist/workbench.html (약 600KB, gzip 186KB, 단일 파일)
 ```
 
 ## 셸 — 세 모드가 한 파일에 사는 방식
@@ -240,7 +240,7 @@ Chrome은 `file://` 페이지를 전부 같은 origin으로 취급하므로, 여
 | 스크롤 (일반 휠) | 16.7 ms/frame = 60 fps |
 | 스크롤 (극단적 플링, 매 프레임 화면 전량 교체) | 30 ms/frame |
 | DOM 노드 | 43행 × 15열 ≈ 645 셀 (논리 250만 셀) |
-| `dist/index.html` | 600 KB (gzip 186 KB) — CDN 지연 로드 라이브러리는 포함되지 않는다 |
+| `dist/workbench.html` | 600 KB (gzip 186 KB) — CDN 지연 로드 라이브러리는 포함되지 않는다 |
 
 ## 구조
 
@@ -315,7 +315,7 @@ npm run verify     # 타입체크 + 단위 테스트 + 빌드 + E2E + 극단 입
 - **`npm run test`** — 460개 단위 테스트. CSV 파서·쿼리 문법·정렬·Op 역연산·직렬화·숨기기 매핑·
   찾기/바꾸기·나누기/결합·문서 저장 레코드, **파일 종류 판정**, jq 토크나이저·JSON 전처리·
   stringified 필드·CSV 행렬 변환·자동완성 단어 분석, Markdown 표 붙여넣기 변환·코드블록 보내기·미니맵 좌표.
-- **`npm run e2e`** — 330여 개 검사. 실제 Chrome에서 `dist/index.html`을 `file://`로 열어 CSV 전
+- **`npm run e2e`** — 330여 개 검사. 실제 Chrome에서 `dist/workbench.html`을 `file://`로 열어 CSV 전
   기능에 더해 **모드 전환**(상태·스크롤 위치 보존, 비활성 모드 단축키 격리), **파일 종류 자동
   전환**(`.md` `.json` JSON 내용 `.txt` 탭 구분 `.txt`), **도구 간 연결**(CSV→jq, jq→CSV, MD
   코드블록→CSV, 덮어쓰기 confirm)을 조작한다. 허용 목록 밖 외부 요청·콘솔 에러가 하나라도 있으면
