@@ -1,4 +1,5 @@
 // TSV/CSV 붙여넣기 → 표 변환의 순수 로직 (감지·파싱·마크다운 표 문자열). ProseMirror 에 의존하지 않는다.
+import { parseBoxTable } from '../../../lib/parse/boxTable';
 import { CsvParser } from '../../../lib/parse/csv';
 
 export interface PasteTableInput {
@@ -8,7 +9,7 @@ export interface PasteTableInput {
 }
 
 export interface PasteTable {
-  kind: 'tsv' | 'csv';
+  kind: 'tsv' | 'csv' | 'box';
   /** 정규화한 원문(줄바꿈 \n, 끝 개행 제거) — 변환 전에 먼저 삽입하는 텍스트 */
   text: string;
   /** 모든 행의 길이가 같은 2차원 배열 (셀은 앞뒤 공백 제거) */
@@ -47,6 +48,10 @@ export function detectPasteTable({ text: raw, html }: PasteTableInput): PasteTab
   if (html && /<table[\s>]/i.test(html)) return null;
   const text = normalizePasted(raw);
   if (!text.trim() || looksLikeMarkdownTable(text)) return null;
+
+  // 터미널(Claude Code 등)이 테두리 문자로 그린 표
+  const box = parseBoxTable(text);
+  if (box) return { kind: 'box', text, rows: box };
 
   if (text.includes('\t')) {
     const rows = parse(text, '\t');

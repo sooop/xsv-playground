@@ -1,3 +1,4 @@
+import { parseBoxTable } from '../parse/boxTable'
 import { CsvParser } from '../parse/csv'
 import { detectDelimiter } from '../parse/detect'
 import { toHtmlTable, toTsv } from '../parse/serialize'
@@ -67,6 +68,9 @@ export async function writeText(text: string): Promise<void> {
  * 탭을 우선한다 — 값 안에 콤마가 많은 데이터에서 오판을 막는다.
  */
 export function parseClipboardTable(text: string): string[][] {
+  // 터미널이 테두리 문자로 그린 표(Claude Code 출력 등)는 구분자 추정보다 먼저 본다
+  const box = parseBoxTable(text)
+  if (box) return box
   const sample = text.slice(0, 64 << 10)
   const delim = sample.includes('\t') ? '\t' : detectDelimiter(sample)
   const p = new CsvParser(delim)
