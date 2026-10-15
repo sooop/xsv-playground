@@ -1,13 +1,17 @@
 <script lang="ts">
+  import { untrack } from 'svelte'
   import { parseClipboardTable, writeTable } from '../../lib/data/clipboard'
+  import { parseBoxTable } from '../../lib/parse/boxTable'
   import { Dataset } from '../../lib/data/dataset.svelte'
   import {
     DOC_SCHEMA_V,
     defaultDocName,
     migrateBody,
     packDoc,
+    packableFromParsed,
     unpackDoc,
     type DocMeta,
+    type DocSource,
   } from '../../lib/data/docSnapshot'
   import {
     DocStoreError,
@@ -18,6 +22,8 @@
     listDocs,
     newDocId,
     putDoc,
+    putDocMeta,
+    pruneDocs,
     storageInfo,
   } from '../../lib/data/docStore'
   import { buildMatrix, runExport } from '../../lib/data/export'
@@ -98,7 +104,13 @@
   let lastBuffer: ArrayBuffer | null = null
   let encodingBanner = $state(false)
 
-  async function loadFiles(files: FileList | File[]): Promise<void> {
+  /** 내역에 남길 때 필요한 출처. `reuseId`가 있으면 새 문서를 만들지 않고 그 문서의 내용을 바꾼다. */
+  interface Incoming {
+    source: DocSource
+    reuseId?: string
+  }
+
+  async function loadFiles(files: FileList | File[], incoming: Incoming = { source: 'file' }): Promise<void> {
     const file = files[0]
     if (!file) return
     progress = 0
@@ -107,14 +119,14 @@
     try {
       const buf = await file.arrayBuffer()
       if (looksSpreadsheet(file.name, new Uint8Array(buf, 0, Math.min(8, buf.byteLength)))) {
-        await loadWorkbook(buf, file.name)
+        await loadWorkbook(buf, file.name, incoming.source)
         return
       }
       lastBuffer = buf
       const dec = decodeBytes(buf)
       encoding = dec.encoding
       encodingBanner = dec.suspect
-      await loadText(dec.text, file.name)
+      await loadText(dec.text, file.name, incoming)
     } catch (e) {
       progress = null
       toast(`파일을 읽지 못했습니다: ${e instanceof Error ? e.message : e}`, 'warn')
@@ -130,14 +142,22 @@
     await tick()
     try {
       encoding = enc
-      await loadText(decodeAs(lastBuffer, enc), ds.fileName)
+      // 같은 파일을 다른 인코딩으로 다시 읽는 것이므로 새 항목이 아니라 지금 항목의 내용을 바꾼다
+      await loadText(decodeAs(lastBuffer, enc), ds.fileName, {
+        source: currentDoc?.source ?? 'file',
+        reuseId: currentDoc?.id,
+      })
     } catch {
       toast(`${enc}로 디코딩할 수 없습니다`, 'warn')
       progress = null
     }
   }
 
-  async function loadText(text: string, fileName: string): Promise<void> {
+  async function loadText(
+    text: string,
+    fileName: string,
+    incoming: Incoming | null = { source: 'file' },
+  ): Promise<void> {
     progress = 0
     progressLabel = '구분자 인식 중…'
     await tick()
@@ -154,7 +174,7 @@
 
     const result = finalize(raw, delim, null, encodingBanner)
     workbook = null
-    await applyParsed(result, fileName)
+    await applyParsed(result, fileName, incoming)
 
     if (result.rows.length === 0) {
       toast('데이터 행이 없습니다', 'warn')
@@ -170,25 +190,43 @@
    * 파싱 결과를 그리드에 올리고 딸린 상태를 초기화한다 — CSV·붙여넣기·엑셀 시트가 공유한다.
    * 통합 문서 핸들만은 여기서 건드리지 않는다(시트 전환은 데이터만 갈아끼우기 때문).
    */
-  async function applyParsed(result: ParseResult, fileName: string): Promise<void> {
+  async function applyParsed(
+    result: ParseResult,
+    fileName: string,
+    incoming: Incoming | null,
+  ): Promise<void> {
+    // 데이터를 갈아끼우기 전에 지금 문서의 미저장 편집을 내역에 확정한다
+    await flushAutosave()
     ds.loadParsed(result, fileName)
 
     view.clearAll()
     sel.clear()
     history.clear()
-    currentDoc = null // 파일을 열면(붙여넣기·샘플 포함) 저장된 문서와의 연결이 끊긴다
+    currentDoc = null // 새로 열면 이전 문서와의 연결이 끊기고, 아래에서 내역에 새로 등록된다
     progress = null
+    if (incoming && result.rows.length > 0) void registerDoc(incoming)
 
     // 그리드가 즉시 키보드를 받도록
     await tick()
     grid?.focusGrid()
   }
 
-  function loadPastedText(text: string): void {
+  /** `incoming`이 null이면 내역에 남기지 않는다(샘플). */
+  function loadPastedText(text: string, incoming: Incoming | null = { source: 'paste' }): void {
     lastBuffer = null
     encoding = 'utf-8'
     encodingBanner = false
-    void loadText(text, '')
+    // 테두리 문자로 그린 표(Claude Code 출력 등)는 텍스트 파싱을 거치지 않고 셀 그대로 올린다
+    const box = parseBoxTable(text)
+    if (box) {
+      workbook = null
+      const result = finalize(box, ',', null, false)
+      void applyParsed(result, '', incoming).then(() =>
+        toast(`표 인식 · ${num(result.rows.length)}행 × ${result.width}열`, 'ok'),
+      )
+      return
+    }
+    void loadText(text, '', incoming)
   }
 
   // --- 엑셀 통합 문서 ---
@@ -199,12 +237,15 @@
   let workbook = $state.raw<{
     handle: WorkbookHandle
     fileName: string
+    source: DocSource
     /** 지금 그리드에 올라와 있는 시트. 아직 고르지 않았으면 null */
     sheet: string | null
+    /** 시트 이름 → 내역의 문서 id. 시트를 오갈 때 편집 내용이 남은 저장본을 연다. 저장 불가 환경이면 비어 있다. */
+    docs: Record<string, string>
   } | null>(null)
   let showSheetPicker = $state(false)
 
-  async function loadWorkbook(buf: ArrayBuffer, fileName: string): Promise<void> {
+  async function loadWorkbook(buf: ArrayBuffer, fileName: string, source: DocSource): Promise<void> {
     progress = 0.1
     progressLabel = isSheetJSLoaded()
       ? `${fileName} 여는 중…`
@@ -219,7 +260,16 @@
       return
     }
 
-    workbook = { handle, fileName, sheet: null }
+    await flushAutosave()
+    workbook = { handle, fileName, source, sheet: null, docs: {} }
+    // 데이터가 있는 시트는 전부 내역에 남긴다 — 어느 시트를 보든 나머지도 보존된다
+    const docs = await registerSheets(
+      handle,
+      fileName,
+      withData.map((s) => s.name),
+      source,
+    )
+    workbook = { handle, fileName, source, sheet: null, docs }
     if (withData.length === 1) {
       await openSheet(withData[0].name)
       return
@@ -234,6 +284,10 @@
     const wb = workbook
     if (!wb) return
     showSheetPicker = false
+    await flushAutosave()
+    // 내역에 저장된 시트가 있으면 그것을 연다 — 이전에 편집한 내용이 그대로 남아 있다
+    const savedId = wb.docs[name]
+    if (savedId && (await openDocById(savedId, { sheet: name }))) return
     progress = 0.3
     progressLabel = `‘${name}’ 시트 변환 중…`
     await tick()
@@ -250,7 +304,12 @@
     encoding = formatLabel(wb.fileName)
     encodingBanner = false
     workbook = { ...wb, sheet: name }
-    await applyParsed(result, wb.fileName)
+    await applyParsed(result, wb.fileName, null)
+    if (docsAvailable) {
+      // 저장본이 지워졌거나 아직 없던 시트 — 지금 상태로 다시 등록한다
+      await registerDoc({ source: wb.source, sheet: name })
+      if (currentDoc && workbook) workbook = { ...workbook, docs: { ...workbook.docs, [name]: currentDoc.id } }
+    }
 
     const bits: string[] = []
     if (wb.handle.sheets.length > 1) bits.push(`‘${name}’ 시트`)
@@ -265,7 +324,8 @@
       showSheetPicker = false
       return
     }
-    if (history.canUndo) {
+    // 내역에 저장하는 환경에서는 편집이 시트별로 보존되므로 확인할 필요가 없다
+    if (history.canUndo && !(docsAvailable && workbook?.docs[workbook.sheet ?? ''])) {
       const ok = await dialogs.confirm({
         title: '시트를 바꿀까요?',
         message: '지금 시트에서 편집한 내용은 사라집니다.',
@@ -310,7 +370,7 @@ ORD-1009,이준호,마우스패드,4,12000,2026-01-20,결제대기
 ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
 
   function loadSample(): void {
-    loadPastedText(SAMPLE)
+    loadPastedText(SAMPLE, null)
   }
 
   // --- 편집 연산 ---
@@ -909,14 +969,26 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
   // `loadText()`가 끝에서 항상 `currentDoc = null`을 하므로, 파일 열기·붙여넣기·샘플·인코딩
   // 재읽기가 전부 자동으로 정체성을 잃는다 — 전부 그 함수를 지나기 때문이다. IndexedDB에서
   // 열 때(`openDocById`)만 `loadText`를 타지 않으므로 별도로 정체성을 부여한다.
-  let currentDoc = $state<{ id: string; name: string; savedVersion: number } | null>(null)
+  interface CurrentDoc {
+    id: string
+    name: string
+    createdAt: number
+    /** 마지막으로 저장한 시점의 `ds.version` / `ds.layoutRev` */
+    savedVersion: number
+    savedLayout: number
+    source?: DocSource
+    groupId?: string
+    sheet?: string
+  }
+  let currentDoc = $state<CurrentDoc | null>(null)
   /**
-   * dirty 표시는 `ds.version` 비교 하나로 끝낸다 — 알려진 공백이 있다: `setColWidth`/`autoWidth`/
-   * 열 순서 변경은 `bump()`를 하지 않으므로 폭·순서만 바꾼 변경은 감지되지 않는다. 잡으려면
-   * 그 경로들에도 `bump()`가 필요한데, 그러면 폭 드래그 한 번마다 250만 셀 파생이 재계산된다 —
-   * 이 표시는 "저장 이후 편집이 있었는가"를 대략 알려주는 용도로 충분해 포기한다.
+   * dirty는 `ds.version`(데이터)과 `ds.layoutRev`(열 폭·순서)를 함께 본다. 폭·순서는 `bump()`를
+   * 하지 않으므로(250만 셀 파생 재계산 방지) 별도 카운터로 감지한다.
    */
-  const docDirty = $derived(currentDoc !== null && ds.version !== currentDoc.savedVersion)
+  const docDirty = $derived(
+    currentDoc !== null &&
+      (ds.version !== currentDoc.savedVersion || ds.layoutRev !== currentDoc.savedLayout),
+  )
   let docsAvailable = $state(false)
   let savedDocs = $state<DocMeta[]>([])
   let showDocPicker = $state(false)
@@ -932,6 +1004,252 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
   async function refreshDocs(): Promise<void> {
     savedDocs = await listDocs()
   }
+
+  // --- 자동 내역 ---
+  //
+  // 파일 열기·붙여넣기·다른 모드에서 보내기·엑셀 시트는 모두 내역(저장된 문서)에 자동 등록되고,
+  // 이후 편집은 디바운스로 자동 저장된다. 내용 해시가 같은 문서가 있으면 새로 만들지 않고 최근으로 끌어올린다.
+  const MAX_DOCS = 100
+  const AUTOSAVE_MS = 3000
+  /** 큰 문서는 직렬화가 메인 스레드를 오래 잡으므로 덜 자주 저장한다 */
+  const AUTOSAVE_BIG_MS = 15_000
+  const BIG_ROWS = 50_000
+
+  let registerSeq = 0
+  let autosaveTimer: ReturnType<typeof setTimeout> | null = null
+  let saveChain: Promise<void> = Promise.resolve()
+  let autosaveWarned = false
+
+  function protectedIds(): Set<string> {
+    const ids = new Set<string>()
+    if (currentDoc) ids.add(currentDoc.id)
+    if (workbook) for (const id of Object.values(workbook.docs)) ids.add(id)
+    return ids
+  }
+
+  async function afterRegister(): Promise<void> {
+    await pruneDocs(MAX_DOCS, protectedIds())
+    await refreshDocs()
+  }
+
+  /** 용량이 빠듯하면 조용히 건너뛴다(자동 경로는 대화상자를 띄우지 않는다). */
+  async function roomFor(byteLen: number): Promise<boolean> {
+    if (byteLen < 32 * 1024 * 1024) return true
+    const info = await storageInfo()
+    return !info || info.quota - info.usage >= byteLen * 1.5
+  }
+
+  function warnAutosaveOnce(msg: string): void {
+    if (autosaveWarned) return
+    autosaveWarned = true
+    toast(msg, 'warn')
+  }
+
+  /** 지금 그리드의 데이터를 내역에 등록한다. 같은 내용이 이미 있으면 그 항목을 쓴다. */
+  async function registerDoc(o: Incoming & { sheet?: string; groupId?: string }): Promise<void> {
+    const seq = ++registerSeq
+    if (!(await idbUsable())) return
+    await new Promise((r) => setTimeout(r, 0)) // 로드 직후 화면이 먼저 그려지게
+    if (seq !== registerSeq || ds.rowCount === 0) return
+    autosaveWarned = false
+    try {
+      const metas = await listDocs()
+      if (seq !== registerSeq) return
+      const now = Date.now()
+      const reuse = o.reuseId ? metas.find((m) => m.id === o.reuseId) : undefined
+      const { meta, body } = packDoc(ds, {
+        id: reuse?.id ?? newDocId(),
+        name: reuse?.name ?? defaultDocName(ds.fileName, now),
+        createdAt: reuse?.createdAt ?? now,
+        now,
+        source: o.source,
+        groupId: o.groupId ?? reuse?.groupId,
+        sheet: o.sheet ?? reuse?.sheet,
+      })
+      const version = ds.version
+      const layout = ds.layoutRev
+      const dup = reuse
+        ? undefined
+        : metas.find(
+            (m) =>
+              m.contentHash === meta.contentHash &&
+              m.bytes === meta.bytes &&
+              m.rowCount === meta.rowCount &&
+              m.colCount === meta.colCount &&
+              (m.sheet ?? '') === (o.sheet ?? ''),
+          )
+      let doc: CurrentDoc
+      if (dup) {
+        await putDocMeta({ ...dup, updatedAt: now })
+        doc = {
+          id: dup.id,
+          name: dup.name,
+          createdAt: dup.createdAt,
+          savedVersion: version,
+          savedLayout: layout,
+          source: dup.source,
+          groupId: dup.groupId,
+          sheet: dup.sheet,
+        }
+      } else {
+        if (!(await roomFor(meta.bytes))) {
+          warnAutosaveOnce('저장 공간이 부족해 내역에 남기지 못했습니다')
+          return
+        }
+        await putDoc(meta, body)
+        doc = {
+          id: meta.id,
+          name: meta.name,
+          createdAt: meta.createdAt,
+          savedVersion: version,
+          savedLayout: layout,
+          source: meta.source,
+          groupId: meta.groupId,
+          sheet: meta.sheet,
+        }
+      }
+      if (seq === registerSeq) currentDoc = doc
+      await afterRegister()
+    } catch (e) {
+      warnAutosaveOnce(`내역에 저장하지 못했습니다: ${e instanceof Error ? e.message : e}`)
+    }
+  }
+
+  /**
+   * 통합 문서의 데이터 있는 시트를 전부 내역에 저장한다(그리드에는 올리지 않는다).
+   * @returns 시트 이름 → 문서 id. 저장 불가 환경이면 빈 객체.
+   */
+  async function registerSheets(
+    handle: WorkbookHandle,
+    fileName: string,
+    names: string[],
+    source: DocSource,
+  ): Promise<Record<string, string>> {
+    const out: Record<string, string> = {}
+    if (!(await idbUsable())) return out
+    try {
+      const metas = await listDocs()
+      const now = Date.now()
+      const stem = defaultDocName(fileName, now)
+      const groupId = names.length > 1 ? newDocId() : undefined
+      for (let i = 0; i < names.length; i++) {
+        const sheet = names[i]
+        progress = 0.2 + 0.6 * (i / names.length)
+        progressLabel = `‘${sheet}’ 시트를 내역에 저장하는 중…`
+        await tick()
+        const result = finalize(handle.toMatrix(sheet), ',', null, false)
+        if (result.rows.length === 0) continue
+        // 첫 시트가 가장 최근으로 보이게 1ms씩 어긋나게 한다
+        const { meta, body } = packDoc(packableFromParsed(result, fileName), {
+          id: newDocId(),
+          name: groupId ? `${stem} · ${sheet}` : stem,
+          createdAt: now - i,
+          now: now - i,
+          source,
+          groupId,
+          sheet,
+        })
+        const dup = metas.find(
+          (m) =>
+            m.contentHash === meta.contentHash &&
+            m.bytes === meta.bytes &&
+            m.sheet === sheet &&
+            m.rowCount === meta.rowCount,
+        )
+        if (dup) {
+          await putDocMeta({ ...dup, updatedAt: now - i })
+          out[sheet] = dup.id
+          continue
+        }
+        if (!(await roomFor(meta.bytes))) {
+          warnAutosaveOnce('저장 공간이 부족해 일부 시트를 내역에 남기지 못했습니다')
+          continue
+        }
+        await putDoc(meta, body)
+        out[sheet] = meta.id
+      }
+      // 이번 시트들은 정리 대상에서 빼고, 오래된 항목만 지운다
+      await pruneDocs(MAX_DOCS, new Set(Object.values(out)))
+      await refreshDocs()
+    } catch (e) {
+      warnAutosaveOnce(`시트를 내역에 저장하지 못했습니다: ${e instanceof Error ? e.message : e}`)
+    }
+    return out
+  }
+
+  function scheduleAutosave(): void {
+    if (autosaveTimer) clearTimeout(autosaveTimer)
+    autosaveTimer = setTimeout(
+      () => void flushAutosave(),
+      ds.rowCount > BIG_ROWS ? AUTOSAVE_BIG_MS : AUTOSAVE_MS,
+    )
+  }
+
+  /** 대기 중인 자동 저장을 지금 실행하고 끝날 때까지 기다린다. */
+  function flushAutosave(): Promise<void> {
+    if (autosaveTimer) {
+      clearTimeout(autosaveTimer)
+      autosaveTimer = null
+    }
+    saveChain = saveChain.then(autosaveNow).catch(() => {})
+    return saveChain
+  }
+
+  async function autosaveNow(): Promise<void> {
+    const doc = currentDoc
+    if (!doc || !docsAvailable) return
+    if (ds.version === doc.savedVersion && ds.layoutRev === doc.savedLayout) return
+    try {
+      const version = ds.version
+      const layout = ds.layoutRev
+      const { meta, body } = packDoc(ds, {
+        id: doc.id,
+        name: doc.name,
+        createdAt: doc.createdAt,
+        now: Date.now(),
+        source: doc.source,
+        groupId: doc.groupId,
+        sheet: doc.sheet,
+      })
+      if (!(await roomFor(meta.bytes))) {
+        warnAutosaveOnce('저장 공간이 부족해 자동 저장하지 못했습니다')
+        return
+      }
+      await putDoc(meta, body)
+      if (currentDoc?.id === doc.id) {
+        currentDoc = { ...doc, savedVersion: version, savedLayout: layout }
+      }
+      void refreshDocs()
+    } catch (e) {
+      if (e instanceof DocStoreError && e.code === 'quota') {
+        warnAutosaveOnce('저장 공간이 부족해 자동 저장하지 못했습니다 — 오래된 문서를 지우세요')
+      } else {
+        warnAutosaveOnce(`자동 저장하지 못했습니다: ${e instanceof Error ? e.message : e}`)
+      }
+    }
+  }
+
+  // 변경이 감지되면 디바운스 저장을 건다 (데이터·열 폭/순서 모두 이 한 곳)
+  $effect(() => {
+    const doc = currentDoc
+    if (!doc) return
+    if (ds.version === doc.savedVersion && ds.layoutRev === doc.savedLayout) return
+    untrack(scheduleAutosave)
+  })
+
+  // 탭을 숨기거나 닫을 때는 기다리지 않고 바로 저장한다
+  $effect(() => {
+    const onHide = () => {
+      if (document.visibilityState === 'hidden') void flushAutosave()
+    }
+    const onPageHide = () => void flushAutosave()
+    document.addEventListener('visibilitychange', onHide)
+    window.addEventListener('pagehide', onPageHide)
+    return () => {
+      document.removeEventListener('visibilitychange', onHide)
+      window.removeEventListener('pagehide', onPageHide)
+    }
+  })
 
   /** 큰 문서를 저장하기 전 남은 용량을 대략 확인한다. estimate를 지원 안 하면 그냥 통과시킨다. */
   async function guardQuota(byteLen: number): Promise<boolean> {
@@ -1013,10 +1331,30 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
 
     try {
       const finalId = id ?? newDocId()
-      const { meta, body } = packDoc(ds, { id: finalId, name, createdAt, now: Date.now() })
+      const keep = opts.rename ? undefined : currentDoc
+      const { meta, body } = packDoc(ds, {
+        id: finalId,
+        name,
+        createdAt,
+        now: Date.now(),
+        source: currentDoc?.source ?? 'file',
+        groupId: keep?.groupId,
+        sheet: keep?.sheet,
+      })
       if (!(await guardQuota(meta.bytes))) return
+      const version = ds.version
+      const layout = ds.layoutRev
       await putDoc(meta, body)
-      currentDoc = { id: finalId, name, savedVersion: ds.version }
+      currentDoc = {
+        id: finalId,
+        name,
+        createdAt,
+        savedVersion: version,
+        savedLayout: layout,
+        source: meta.source,
+        groupId: meta.groupId,
+        sheet: meta.sheet,
+      }
       toast(`"${name}" 저장 · ${num(meta.rowCount)}행 · ${bytes(meta.bytes)}`, 'ok')
       void refreshDocs()
     } catch (e) {
@@ -1037,20 +1375,21 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
   }
 
   /** IndexedDB에 저장된 문서를 연다 — `loadText`와 같은 마무리 시퀀스를 따르되 재파싱하지 않는다. */
-  async function openDocById(id: string): Promise<void> {
+  async function openDocById(id: string, keep?: { sheet: string }): Promise<boolean> {
     showDocPicker = false
+    await flushAutosave()
     const body = await getDocBody(id)
     if (!body) {
       toast('문서를 찾을 수 없습니다 — 이미 삭제되었을 수 있습니다', 'warn')
       void refreshDocs()
-      return
+      return false
     }
     if (body.v > DOC_SCHEMA_V) {
       await dialogs.alert({
         title: '열 수 없는 문서',
         message: '더 새 버전의 xsv에서 저장된 문서입니다.',
       })
-      return
+      return false
     }
 
     const meta = await getDocMeta(id)
@@ -1070,17 +1409,64 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
     sel.clear()
     history.clear()
     lastBuffer = null
-    workbook = null
-    encoding = 'utf-8'
+    registerSeq++ // 아직 끝나지 않은 자동 등록이 이 문서의 정체성을 덮어쓰지 못하게
+    // 시트 전환이면 통합 문서 핸들을 유지한다(시트 선택기·시트별 저장본 매핑)
+    workbook = keep && workbook ? { ...workbook, sheet: keep.sheet } : null
+    encoding = keep && workbook ? formatLabel(workbook.fileName) : 'utf-8'
     encodingBanner = false
     progress = null
 
-    currentDoc = { id, name, savedVersion: ds.version }
+    currentDoc = {
+      id,
+      name,
+      createdAt: meta?.createdAt ?? Date.now(),
+      savedVersion: ds.version,
+      savedLayout: ds.layoutRev,
+      source: meta?.source,
+      groupId: meta?.groupId,
+      sheet: meta?.sheet,
+    }
     toast(`"${name}" · ${num(ds.rowCount)}행 × ${ds.colCount}열`, 'ok')
     if (lostRows > 0) toast(`${num(lostRows)}행을 복원하지 못했습니다`, 'warn')
 
     await tick()
     grid?.focusGrid()
+    return true
+  }
+
+  /** 지금 문서의 이름만 바꾼다(자동 등록된 '무제 …' 이름을 알아보기 좋게). */
+  async function renameDoc(): Promise<void> {
+    const doc = currentDoc
+    if (!doc) return
+    const input = await dialogs.prompt({
+      title: '이름 바꾸기',
+      message: '문서 이름',
+      value: doc.name,
+      validate: (v) =>
+        v.trim() === '' ? '이름을 입력하세요' : v.trim().length > 120 ? '120자 이내로' : null,
+    })
+    if (input === null || input.trim() === doc.name) return
+    const name = input.trim()
+    await flushAutosave()
+    const meta = await getDocMeta(doc.id)
+    if (meta) await putDocMeta({ ...meta, name })
+    if (currentDoc?.id === doc.id) currentDoc = { ...currentDoc, name }
+    await refreshDocs()
+  }
+
+  /** 저장 — 이미 내역에 있는 문서면 대기 중인 자동 저장을 즉시 확정한다. */
+  async function saveNow(): Promise<void> {
+    if (!hasData) {
+      toast('저장할 데이터가 없습니다', 'warn')
+      return
+    }
+    if (!currentDoc) {
+      await saveDoc({ rename: false })
+      return
+    }
+    const name = currentDoc.name
+    await flushAutosave()
+    if (currentDoc && !docDirty) toast(`"${name}" 저장됨`, 'ok')
   }
 
   async function deleteDocById(id: string, name: string): Promise<void> {
@@ -1109,7 +1495,12 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
           accel: 's',
           hint: 'Ctrl S',
           disabled: !hasData || !docsAvailable,
-          run: () => void saveDoc({ rename: false }),
+          run: () => void saveNow(),
+        },
+        {
+          label: '이름 바꾸기…',
+          disabled: !currentDoc,
+          run: () => void renameDoc(),
         },
         {
           label: '다른 이름으로 저장…',
@@ -1120,14 +1511,14 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
         },
         { label: '', sep: true },
         {
-          label: `문서 열기…${savedDocs.length ? ` (${savedDocs.length})` : ''}`,
+          label: `내역에서 열기…${savedDocs.length ? ` (${savedDocs.length})` : ''}`,
           accel: 'o',
           disabled: !docsAvailable || savedDocs.length === 0,
           hint: !docsAvailable
             ? 'IndexedDB 불가'
             : savedDocs.length === 0
               ? '저장된 문서 없음'
-              : '',
+              : 'Ctrl Shift O',
           run: () => (showDocPicker = true),
         },
       ],
@@ -1297,7 +1688,7 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
           label: '문서 저장',
           hint: 'Ctrl S',
           disabled: !docsAvailable,
-          run: () => void saveDoc({ rename: false }),
+          run: () => void saveNow(),
         },
         {
           label: '문서 열기…',
@@ -1463,10 +1854,15 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
       if (hasData) showExport = true
       return
     }
+    if (mod && e.shiftKey && (e.key === 'o' || e.key === 'O')) {
+      take()
+      if (docsAvailable) showDocPicker = true
+      return
+    }
     if (mod && (e.key === 's' || e.key === 'S')) {
       // Chrome의 "페이지 저장" 대화상자를 반드시 막아야 한다
       take()
-      if (hasData) void saveDoc({ rename: e.shiftKey })
+      if (hasData) void (e.shiftKey ? saveDoc({ rename: true }) : saveNow())
       return
     }
     if (e.key === 'Escape') {
@@ -1494,6 +1890,11 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
     await loadFiles([file])
   }
 
+  /** 다른 모드에서 온 데이터의 출처 — 내역 배지에 쓴다 */
+  function incomingFrom(from: ModePayload['from']): Incoming {
+    return { source: from === 'md' ? 'md' : from === 'jq' ? 'jq' : 'file' }
+  }
+
   export async function openText(text: string, name: string): Promise<void> {
     lastBuffer = null
     encoding = 'utf-8'
@@ -1503,11 +1904,14 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
 
   export async function receive(p: ModePayload): Promise<void> {
     if (p.kind === 'file') {
-      await openFile(p.file)
+      await loadFiles([p.file], incomingFrom(p.from))
       return
     }
     if (p.kind === 'text') {
-      await openText(p.text, p.name)
+      lastBuffer = null
+      encoding = 'utf-8'
+      encodingBanner = false
+      await loadText(p.text, p.name, incomingFrom(p.from))
       return
     }
     // 표는 텍스트로 직렬화하지 않고 바로 ParseResult로 만든다(인용·개행 왕복 손실 방지)
@@ -1516,13 +1920,14 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
     encodingBanner = false
     const result = finalize([p.header, ...p.rows], ',', true, false)
     workbook = null
-    await applyParsed(result, p.name)
+    await applyParsed(result, p.name, incomingFrom(p.from))
     toast(`${num(result.rows.length)}행 × ${result.width}열`, 'ok')
   }
 
   /** 셸이 "저장 후 바꾸기"에서 부른다 — 실제로 저장됐으면 true. */
   export async function saveCurrent(): Promise<boolean> {
-    await saveDoc({ rename: false })
+    if (currentDoc) await flushAutosave()
+    else await saveDoc({ rename: false })
     return currentDoc !== null && !docDirty
   }
 
@@ -1546,6 +1951,7 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
     menu = null
     toolsMenu = null
     docMenu = null
+    void flushAutosave() // 다른 모드로 넘어가는 순간 대기 중인 편집을 확정한다
   })
 
   // 탭바가 읽는 요약 상태
@@ -1578,6 +1984,15 @@ ORD-1010,한소진,노이즈캔슬링 헤드폰,1,349000,2026-01-21,배송중`
           <svg viewBox="0 0 8 5" width="7" height="5" aria-hidden="true"><path d="M0 0l4 4.4L8 0z" fill="currentColor" /></svg>
         </button>
       {/if}
+
+      <button
+        class="btn"
+        onclick={() => (showDocPicker = true)}
+        disabled={!docsAvailable}
+        title="내역에서 문서 열기 (Ctrl+Shift+O)"
+      >
+        내역{savedDocs.length ? ` ${savedDocs.length}` : ''}
+      </button>
 
       <button
         class="btn"

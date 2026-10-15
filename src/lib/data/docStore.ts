@@ -54,3 +54,31 @@ export async function deleteDoc(id: string): Promise<void> {
     tx.objectStore(STORE_BODY).delete(id)
   })
 }
+
+/** 본문은 건드리지 않고 메타만 갱신한다 — 같은 내용을 다시 올렸을 때 항목을 최근으로 끌어올린다. */
+export async function putDocMeta(meta: DocMeta): Promise<void> {
+  await withTx([STORE_META], 'readwrite', (tx) => {
+    tx.objectStore(STORE_META).put(meta)
+  })
+}
+
+/**
+ * 문서 수가 `max`를 넘으면 가장 오래 갱신되지 않은 것부터 지운다. `protect`에 든 id는 남긴다
+ * (지금 열려 있는 문서·같은 통합 문서의 시트). 지운 개수를 돌려준다.
+ */
+export async function pruneDocs(max: number, protect: ReadonlySet<string>): Promise<number> {
+  try {
+    const metas = await listDocs() // 최신 우선
+    const victims = metas.slice(max).filter((m) => !protect.has(m.id))
+    if (victims.length === 0) return 0
+    await withTx([STORE_META, STORE_BODY], 'readwrite', (tx) => {
+      for (const m of victims) {
+        tx.objectStore(STORE_META).delete(m.id)
+        tx.objectStore(STORE_BODY).delete(m.id)
+      }
+    })
+    return victims.length
+  } catch {
+    return 0
+  }
+}

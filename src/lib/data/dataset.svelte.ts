@@ -92,6 +92,11 @@ export class Dataset {
   header = $state.raw<string[]>([])
   /** 변경 카운터 — 파생 계산의 무효화 신호 */
   version = $state(0)
+  /**
+   * 열 폭·순서 변경 카운터. 이 둘은 `bump()`를 하지 않는다(폭 드래그마다 250만 셀 파생이
+   * 재계산되므로) — 자동 저장만 이 값을 읽어 변경을 감지한다.
+   */
+  layoutRev = $state(0)
 
   /** 뷰 칼럼 인덱스 → source 칼럼 인덱스. 열 순서 변경은 이것만 치환한다. */
   colOrder = $state.raw<number[]>([])
@@ -266,6 +271,7 @@ export class Dataset {
     const next = this.colWidths.slice()
     next[col] = Math.max(MIN_W, Math.min(1200, Math.round(w)))
     this.colWidths = next
+    this.layoutRev++
   }
 
   /** 칼럼 내용에 맞춰 폭을 재계산한다 (헤더 경계 더블클릭). */
@@ -273,6 +279,7 @@ export class Dataset {
     const next = this.colWidths.slice()
     next[col] = measureCol(this.rows, this.header[col] ?? '', col)
     this.colWidths = next
+    this.layoutRev++
   }
 
   /** 뷰 칼럼 인덱스 → source 칼럼 인덱스 */
@@ -405,6 +412,7 @@ export class Dataset {
       case 'setColOrder': {
         // 뷰 순서만 바꾼다 — 데이터는 그대로
         this.colOrder = op.after.slice()
+        this.layoutRev++
         return { structural: false }
       }
 

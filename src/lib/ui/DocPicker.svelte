@@ -29,6 +29,8 @@
     if (cursor >= filtered.length) cursor = Math.max(0, filtered.length - 1)
   })
 
+  const SOURCE_LABEL: Record<string, string> = { md: 'md에서', jq: 'jq에서', paste: '붙여넣기' }
+
   function openAt(i: number): void {
     const d = filtered[i]
     if (!d || d.v > DOC_SCHEMA_V) return
@@ -81,6 +83,7 @@
       <div
         class="row"
         class:cursor={i === cursor}
+        class:grouped={!!d.groupId && filtered[i - 1]?.groupId === d.groupId}
         onpointerenter={() => (cursor = i)}
       >
         <button
@@ -92,6 +95,8 @@
           <span class="name-line">
             <span class="name">{d.name}</span>
             {#if d.id === currentId}<span class="tag">현재</span>{/if}
+            {#if d.groupId}<span class="tag sub" title="같은 엑셀 파일의 시트">시트</span>{/if}
+            {#if d.source && SOURCE_LABEL[d.source]}<span class="tag sub">{SOURCE_LABEL[d.source]}</span>{/if}
             {#if incompatible}<span class="tag warn">호환되지 않음</span>{/if}
           </span>
           <span class="meta-line">
@@ -155,6 +160,9 @@
     gap: 2px;
     border-radius: 6px;
   }
+  .row.grouped {
+    margin-left: 12px;
+  }
   .row.cursor {
     background: var(--bg-hover);
   }
@@ -192,6 +200,10 @@
     background: var(--accent-soft);
     color: var(--accent);
     font-size: 9.5px;
+  }
+  .tag.sub {
+    background: var(--bg-hover);
+    color: var(--text-faint);
   }
   .tag.warn {
     background: color-mix(in srgb, var(--danger) 16%, transparent);

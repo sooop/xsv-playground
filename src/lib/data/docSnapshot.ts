@@ -1,8 +1,7 @@
 import { parseChunked } from '../parse/csv'
 import { serialize } from '../parse/serialize'
 import { baseName } from '../util/format'
-import type { Dataset } from './dataset.svelte'
-import type { ColType, Delimiter } from './types'
+import type { ColType, Delimiter, ParseResult } from './types'
 
 /** 저장 레코드의 스키마 버전. 형태를 바꿀 때 올리고 {@link migrateBody}에 이행 경로를 더한다. */
 export const DOC_SCHEMA_V = 1
@@ -12,6 +11,9 @@ export const DOC_SCHEMA_V = 1
  * 콤마보다 셀 값에 등장할 확률이 훨씬 낮아 minimal 인용이 실제로 minimal하게 유지된다.
  */
 export const PAYLOAD_DELIM = '\t'
+
+/** 문서가 내역에 들어온 경로 — 목록의 배지와 필터에 쓴다. */
+export type DocSource = 'file' | 'paste' | 'md' | 'jq'
 
 /** 문서 목록에 필요한 가벼운 메타데이터 — 페이로드를 역직렬화하지 않고 읽는다. */
 export interface DocMeta {
@@ -26,6 +28,14 @@ export interface DocMeta {
   bytes: number
   fileName: string
   delimiter: Delimiter
+  /** 들어온 경로. 이전 버전 레코드에는 없다 */
+  source?: DocSource
+  /** 같은 통합 문서(xlsx)에서 나온 시트들이 공유하는 id */
+  groupId?: string
+  /** 통합 문서의 시트 이름 */
+  sheet?: string
+  /** 헤더+페이로드의 해시 — 같은 내용을 다시 올릴 때 새 문서를 만들지 않으려고 쓴다 */
+  contentHash?: string
 }
 
 /** 문서 전체 — 열 때만 읽는다. */
@@ -59,6 +69,41 @@ export interface DocSnapshot {
   fileName: string
 }
 
+/** `packDoc`이 읽는 최소 표면 — `Dataset`이 그대로 만족하고, 그리드에 올리지 않은 시트도 만들 수 있다. */
+export interface PackSource {
+  rows: string[][]
+  header: string[]
+  firstRow: readonly string[] | null
+  colOrder: number[]
+  colWidths: number[]
+  colTypes: ColType[]
+  delimiter: Delimiter
+  hasHeader: boolean
+  fileName: string
+  rowCount: number
+  colCount: number
+}
+
+/**
+ * 파싱 결과를 그리드(`Dataset`)에 올리지 않고 바로 저장할 수 있는 형태로 만든다. 열 폭·타입은
+ * 비워 둔다 — 여는 쪽(`Dataset.loadSnapshot`)이 길이가 맞지 않으면 재계산으로 폴백한다.
+ */
+export function packableFromParsed(r: ParseResult, fileName: string): PackSource {
+  return {
+    rows: r.rows,
+    header: r.header,
+    firstRow: r.firstRow,
+    colOrder: r.header.map((_, i) => i),
+    colWidths: [],
+    colTypes: [],
+    delimiter: r.delimiter,
+    hasHeader: r.hasHeader,
+    fileName,
+    rowCount: r.rows.length,
+    colCount: r.header.length,
+  }
+}
+
 /**
  * 현재 데이터셋을 저장 레코드로 직렬화한다.
  *
@@ -73,8 +118,16 @@ export interface DocSnapshot {
  * (중복·빈 이름 포함)이 글자 그대로 복원된다.
  */
 export function packDoc(
-  ds: Dataset,
-  at: { id: string; name: string; createdAt: number; now: number },
+  ds: PackSource,
+  at: {
+    id: string
+    name: string
+    createdAt: number
+    now: number
+    source?: DocSource
+    groupId?: string
+    sheet?: string
+  },
 ): { meta: DocMeta; body: DocBody } {
   // 1열 표는 유일하게 위험하다: CsvParser.endRow()는 인용 안 된 단일 빈 필드 행을
   // 빈 줄로 보고 버린다. 열이 2개 이상이면 전부 빈 행도 구분자가 남아 필드 수가 2 이상이라
@@ -108,7 +161,11 @@ export function packDoc(
     bytes: payload.byteLength,
     fileName: ds.fileName,
     delimiter: ds.delimiter,
+    contentHash: hashDoc(body.header, payload),
   }
+  if (at.source) meta.source = at.source
+  if (at.groupId) meta.groupId = at.groupId
+  if (at.sheet) meta.sheet = at.sheet
   return { meta, body }
 }
 
@@ -155,6 +212,18 @@ export async function unpackDoc(
     },
     lostRows,
   }
+}
+
+/**
+ * 헤더와 페이로드의 FNV-1a(32비트) 해시. 암호학적 강도는 필요 없다 — 중복 판정은 행·열 수와
+ * 바이트 수까지 함께 비교하므로 충돌해도 다른 문서를 같은 것으로 착각할 확률은 무시할 만하다.
+ */
+export function hashDoc(header: readonly string[], payload: Uint8Array): string {
+  let h = 0x811c9dc5
+  const head = new TextEncoder().encode(header.join(''))
+  for (let i = 0; i < head.length; i++) h = Math.imul(h ^ head[i], 0x01000193)
+  for (let i = 0; i < payload.length; i++) h = Math.imul(h ^ payload[i], 0x01000193)
+  return (h >>> 0).toString(16).padStart(8, '0')
 }
 
 /** 저장 프롬프트 기본값. 파일명 stem을 쓰고, 없으면(붙여넣기) 날짜·시각을 붙인 이름을 만든다. */

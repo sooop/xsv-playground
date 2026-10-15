@@ -223,3 +223,41 @@ describe('migrateBody', () => {
     expect(migrateBody(body)).toBe(body)
   })
 })
+
+describe('내역용 메타 (contentHash·출처·시트)', () => {
+  const at = { id: 'a', name: 'n', createdAt: 1, now: 2 }
+
+  it('같은 내용은 같은 해시, 한 셀만 달라도 다른 해시', () => {
+    const raw = [['a', 'b'], ['1', '2'], ['3', '4']]
+    const h1 = packDoc(makeDataset(raw), at).meta.contentHash
+    const h2 = packDoc(makeDataset(raw), { ...at, id: 'b' }).meta.contentHash
+    const h3 = packDoc(makeDataset([['a', 'b'], ['1', '2'], ['3', '5']]), at).meta.contentHash
+    expect(h1).toBeTruthy()
+    expect(h2).toBe(h1)
+    expect(h3).not.toBe(h1)
+  })
+
+  it('헤더가 다르면 해시가 다르다', () => {
+    const a = packDoc(makeDataset([['a', 'b'], ['1', '2']]), at).meta.contentHash
+    const b = packDoc(makeDataset([['a', 'c'], ['1', '2']]), at).meta.contentHash
+    expect(a).not.toBe(b)
+  })
+
+  it('source·groupId·sheet가 메타에 실린다', () => {
+    const { meta } = packDoc(makeDataset([['a'], ['1']]), {
+      ...at,
+      source: 'md',
+      groupId: 'g',
+      sheet: 'Sheet1',
+    })
+    expect(meta).toMatchObject({ source: 'md', groupId: 'g', sheet: 'Sheet1' })
+  })
+
+  it('열 폭·순서 변경은 layoutRev만 올린다', () => {
+    const ds = makeDataset([['a', 'b'], ['1', '2']])
+    const v = ds.version
+    ds.setColWidth(0, 200)
+    expect(ds.layoutRev).toBe(1)
+    expect(ds.version).toBe(v)
+  })
+})

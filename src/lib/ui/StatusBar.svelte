@@ -137,7 +137,7 @@
     <span
       class="seg faint file"
       class:dirty={docDirty}
-      title="브라우저에 저장된 문서{docDirty ? ' · 저장 이후 편집됨' : ''}"
+      title="내역에 자동 저장되는 문서{docDirty ? ' · 저장 대기 중' : ''}"
     >{docDirty ? '● ' : ''}{docName}</span>
   {/if}
   {#if ds.fileName}
